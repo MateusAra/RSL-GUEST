@@ -1,0 +1,28 @@
+# Project data
+papers/pdf/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.pytest_cache/
+.alembic-test-cache/
+*.sqlite3
+.mypy_cache/
+
+# Node / frontend
+node_modules/
+dist/
+build/
+coverage/
+
+# Environment
+.env
+.env.*
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/

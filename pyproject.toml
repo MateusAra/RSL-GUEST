@@ -1,0 +1,21 @@
+[project]
+name = "rsl-foundation"
+version = "0.1.0"
+description = "Foundation module for the RSL system"
+requires-python = ">=3.12"
+dependencies = [
+	"PyJWT>=2.9.0,<3.0.0",
+	"SQLAlchemy>=2.0,<3.0",
+	"alembic>=1.13,<2.0",
+	"psycopg[binary]>=3.2,<4.0",
+	"rispy>=0.9,<1.0",
+	"bibtexparser>=1.4,<2.0",
+	"rapidfuzz>=3.9,<4.0",
+	"python-multipart>=0.0.9,<1.0",
+	"minio>=7.2,<8.0",
+	"scikit-learn>=1.5,<2.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = [".", "src"]
+testpaths = ["tests"]

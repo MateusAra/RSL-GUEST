@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
 from backend.api import app
+from tests.helpers import create_execution, save_search_string
 
 
 RIS_ONE = b"""TY  - JOUR
@@ -54,13 +55,14 @@ def _login(client: TestClient) -> str:
 
 
 def _execution(client: TestClient, project_id: str, token: str, base: str) -> str:
-    response = client.post(
-        f"/api/v1/projects/{project_id}/search-executions",
-        headers={"Authorization": f"Bearer {token}"},
-        json={"base": base, "query": "(XAI) AND (multi-agent)", "fields": ["title", "abstract", "doi"]},
-    )
-    assert response.status_code == 201, response.text
-    return response.json()["id"]
+    return create_execution(
+        client,
+        project_id,
+        {"Authorization": f"Bearer {token}"},
+        base,
+        "(XAI) AND (multi-agent)",
+        fields=["title", "abstract", "doi"],
+    )["id"]
 
 
 def test_import_archives_raw_result_and_dedup_keeps_human_decision():
@@ -95,6 +97,8 @@ def test_import_archives_raw_result_and_dedup_keeps_human_decision():
         candidates = dedup.json()["candidates"]
         assert len(candidates) == 1
         assert candidates[0]["match_type"] == "doi_exact"
+        assert candidates[0]["decision"] == "duplicate"
+        assert candidates[0]["method"] == "automatic"
 
         decision = client.post(
             f"/api/v1/duplicate-candidates/{candidates[0]['id']}/decision",
@@ -153,24 +157,21 @@ def test_search_query_and_google_scholar_limit_are_validated():
         url = f"/api/v1/projects/{project['id']}/search-executions"
         headers = {"Authorization": f"Bearer {token}"}
 
-        invalid_query = client.post(
-            url,
-            headers=headers,
-            json={"base": "scopus", "query": "(XAI AND MAS", "fields": ["title"]},
-        )
+        invalid_query = save_search_string(client, project["id"], headers, "scopus", "(XAI AND MAS")
         assert invalid_query.status_code == 422
 
+        assert save_search_string(client, project["id"], headers, "google_scholar").status_code == 201
         over_limit = client.post(
             url,
             headers=headers,
-            json={"base": "google_scholar", "query": "XAI AND MAS", "fields": ["title"], "result_limit": 301},
+            json={"base": "google_scholar", "reported_result_count": 300, "result_limit": 301},
         )
         assert over_limit.status_code == 422
 
         valid = client.post(
             url,
             headers=headers,
-            json={"base": "google_scholar", "query": "XAI AND MAS", "fields": ["title"], "result_limit": 300},
+            json={"base": "google_scholar", "reported_result_count": 300, "result_limit": 300},
         )
         assert valid.status_code == 201
         assert valid.json()["result_limit"] == 300

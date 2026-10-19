@@ -98,6 +98,10 @@ Specs 001 e 002 (RQs e critérios). Alimenta a spec 004.
   Estudo terciário (§8): se houver 3 ou mais RSLs sobre MAS + XAI/RAI, avaliar revisão de revisões com AMSTAR-2, em seção separada. Não há requisito para isso; se quiser, vira proposta.
 - ~~`[ESCLARECER 3]`~~ **Resolvido com o v4.0 (§5.1):** os 4 estudos seminais SX15, SX21, SX22 e SX23 devem ser recuperados pela string **em cada base** antes da busca definitiva. Falha em recuperar qualquer um exige revisar a string, com registro no log de desvios. A checagem é de recuperação por base; quasi-sensibilidade numérica não é exigida.
 
+- **Decidido em 19/10/2026 (aguarda validação do PO):** "versão mais completa" (regra 3, RF21) = tipo de publicação primeiro (periódico > anais > pré-print), depois o número de metadados preenchidos, depois o ano mais recente.
+- **Decidido em 19/10/2026 (aguarda validação do PO):** os incluídos de uma rodada de snowballing (RF19, regra 5) são calculados pela triagem: candidato não duplicado com resultado "incluído" na Fase 2 (spec 004).
+- **Decidido em 19/10/2026 (aguarda validação do PO):** o Portão 1 é confirmado no sistema e exige os seminais recuperados em todas as bases (CA-05); a exigência de desvio para mudar a string vale desde o Portão 0 (spec 002, regra 2), o que também cobre a regra 2 desta spec.
+
 ## 12. Rastreabilidade
 
 | Requisito | Critérios de aceite | Casos de teste |

@@ -134,6 +134,7 @@ A matriz é simétrica (a ordem R1 × R2 não importa). Cada revisor vota Inclui
 - ~~`[ESCLARECER 1]`~~ **Resolvido com o v4.0:** matriz confirmada; D e E avançam e vão a reunião de consenso, com arbitragem do terceiro revisor se persistir.
 - ~~`[ESCLARECER 2]`~~ **Resolvido com o v4.0:** o piloto de 20 estudos é feito antes da Fase 1 (κ ≥ 0,6); na Fase 2 o κ é recalculado sobre o trabalho real.
 - **Resolvido pelo PO:** na Fase 2, reportar κ e alertar quando κ < 0,6, sem bloquear o fechamento da fase.
+- **Decidido em 19/10/2026 (aguarda validação do PO):** no consenso de D/E (CA-07), R1 e R2 registram cada um sua posição depois da reunião; posições iguais fecham o caso; diferentes, ou "sem consenso", escalam ao R3. Ver `plan.md`.
 
 ## 13. Rastreabilidade
 

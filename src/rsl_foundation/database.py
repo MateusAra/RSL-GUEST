@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, JSON, LargeBinary, String, UniqueConstraint, create_engine
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKey, Integer, JSON, LargeBinary, String, UniqueConstraint, create_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -136,6 +136,10 @@ class SearchExecutionRecord(Base):
     query: Mapped[str] = mapped_column(String(4000), nullable=False)
     fields: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     result_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    search_string_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    year_from: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    year_to: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    reported_result_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     executed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
     )
@@ -144,11 +148,22 @@ class SearchExecutionRecord(Base):
 
 class RawImportRecord(Base):
     __tablename__ = "raw_imports"
+    __table_args__ = (
+        CheckConstraint(
+            "(search_execution_id IS NULL) <> (snowball_round_id IS NULL)",
+            name="ck_raw_import_single_origin",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    search_execution_id: Mapped[str] = mapped_column(
-        String(64), ForeignKey("search_executions.id", ondelete="CASCADE"), nullable=False, index=True
+    search_execution_id: Mapped[str | None] = mapped_column(
+        String(64), ForeignKey("search_executions.id", ondelete="CASCADE"), nullable=True, index=True
     )
+    snowball_round_id: Mapped[str | None] = mapped_column(
+        String(64), ForeignKey("snowball_rounds.id"), nullable=True, index=True
+    )
+    direction: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    anomalies: Mapped[list[dict[str, object]] | None] = mapped_column(JSON, nullable=True)
     file_name: Mapped[str] = mapped_column(String(300), nullable=False)
     content_hash_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     content: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
@@ -161,14 +176,25 @@ class RawImportRecord(Base):
 
 class StudyRecord(Base):
     __tablename__ = "studies"
+    __table_args__ = (
+        CheckConstraint(
+            "(search_execution_id IS NULL) <> (snowball_round_id IS NULL)",
+            name="ck_study_single_origin",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     project_id: Mapped[str] = mapped_column(
         String(64), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    search_execution_id: Mapped[str] = mapped_column(
-        String(64), ForeignKey("search_executions.id"), nullable=False
+    search_execution_id: Mapped[str | None] = mapped_column(
+        String(64), ForeignKey("search_executions.id"), nullable=True
     )
+    snowball_round_id: Mapped[str | None] = mapped_column(
+        String(64), ForeignKey("snowball_rounds.id"), nullable=True, index=True
+    )
+    origin: Mapped[str] = mapped_column(String(40), default="search", nullable=False)
+    publication_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
     raw_import_id: Mapped[str] = mapped_column(String(64), ForeignKey("raw_imports.id"), nullable=False)
     title: Mapped[str] = mapped_column(String(2000), nullable=False)
     normalized_title: Mapped[str] = mapped_column(String(2000), nullable=False)
@@ -214,6 +240,7 @@ class DuplicateDecisionRecord(Base):
     decision: Mapped[str] = mapped_column(String(32), nullable=False)
     canonical_study_id: Mapped[str | None] = mapped_column(String(64), ForeignKey("studies.id"), nullable=True)
     justification: Mapped[str] = mapped_column(String(4000), nullable=False)
+    method: Mapped[str] = mapped_column(String(16), default="manual", nullable=False)
     decided_by: Mapped[str] = mapped_column(String(64), ForeignKey("app_users.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
@@ -251,6 +278,32 @@ class TriageVoteRecord(Base):
     )
 
 
+class TriageResolutionRecord(Base):
+    """Consensus position of R1/R2 or arbitration of R3 for a D/E conflict (spec 004, RF26)."""
+
+    __tablename__ = "triage_resolutions"
+    __table_args__ = (
+        UniqueConstraint("project_id", "study_id", "phase", "stage", "user_id", name="uq_triage_resolution_user"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    project_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    study_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("studies.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    phase: Mapped[int] = mapped_column(Integer, nullable=False)
+    stage: Mapped[str] = mapped_column(String(16), nullable=False)
+    user_id: Mapped[str] = mapped_column(String(64), ForeignKey("app_users.id"), nullable=False)
+    decision: Mapped[str] = mapped_column(String(16), nullable=False)
+    criterion_id: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    justification: Mapped[str] = mapped_column(String(4000), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+
+
 class QualityAssessmentRecord(Base):
     __tablename__ = "quality_assessments"
     __table_args__ = (
@@ -275,12 +328,69 @@ class QualityAssessmentRecord(Base):
     classification: Mapped[str] = mapped_column(String(32), nullable=False)
     confirmed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    initial_scores: Mapped[list[dict[str, object]] | None] = mapped_column(JSON, nullable=True)
+    instrument_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    reopen_justification: Mapped[str | None] = mapped_column(String(4000), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
     )
+
+
+class QualityArbitrationRecord(Base):
+    __tablename__ = "quality_arbitrations"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    project_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    study_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("studies.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    criterion_id: Mapped[str] = mapped_column(String(20), nullable=False)
+    score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    justification: Mapped[str] = mapped_column(String(4000), nullable=False)
+    arbiter_user_id: Mapped[str] = mapped_column(String(64), ForeignKey("app_users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+
+
+class ProjectGateRecord(Base):
+    __tablename__ = "project_gates"
+    __table_args__ = (UniqueConstraint("project_id", "gate", name="uq_project_gate"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    project_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    gate: Mapped[int] = mapped_column(Integer, nullable=False)
+    confirmed_by: Mapped[str] = mapped_column(String(64), ForeignKey("app_users.id"), nullable=False)
+    details: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    confirmed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+
+
+class SnowballRoundRecord(Base):
+    __tablename__ = "snowball_rounds"
+    __table_args__ = (UniqueConstraint("project_id", "round_number", name="uq_snowball_round_number"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    project_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    round_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), default="open", nullable=False)
+    opened_by: Mapped[str] = mapped_column(String(64), ForeignKey("app_users.id"), nullable=False)
+    opened_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+    closed_by: Mapped[str | None] = mapped_column(String(64), ForeignKey("app_users.id"), nullable=True)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    closing_summary: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
 
 
 class ExtractionRecord(Base):

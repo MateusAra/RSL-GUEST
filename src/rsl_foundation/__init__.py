@@ -4,13 +4,12 @@ import hashlib
 import hmac
 import re
 import secrets
-from difflib import unified_diff
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from enum import Enum
 from typing import Any
 
 import jwt
+import numpy as np
 from jwt import InvalidTokenError
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -31,41 +30,31 @@ from .database import (
     ProjectRecord,
     ProtocolDeviationRecord,
     QualityAssessmentRecord,
-    RawImportRecord,
     SearchExecutionRecord,
     StudyRecord,
     TriageVoteRecord,
     UserRecord,
     build_engine,
 )
+from .configuration_service import FIXED_VERDICTS, DEFAULT_QUALITY_WEIGHTING, ConfigurationMixin
 from .quality import (
-    QA_CATEGORIES,
     calculate_quality_scores,
     calculate_weighted_kappa,
+    validate_instrument,
 )
+from .quality_service import KAPPA_WARNING_THRESHOLD, QualityMixin, _score_map
 from .extraction import EXTRACTION_FIELD_IDS, is_substantive_field
-
-
-class Role(Enum):
-    ADMIN = "admin"
-    REVISOR = "revisor"
-    TERCEIRO_REVISOR = "terceiro_revisor"
-    OBSERVADOR = "observador"
-
-
-def classify_triage_pair(first_vote: str, second_vote: str) -> tuple[str, str]:
-    valid_votes = {"incluir", "excluir", "incerto"}
-    if first_vote not in valid_votes or second_vote not in valid_votes:
-        raise ValueError("triage votes must be incluir, excluir or incerto")
-    outcomes = {
-        frozenset(("incluir", "incluir")): ("A", "included"),
-        frozenset(("incluir", "incerto")): ("B", "advances"),
-        frozenset(("incerto", "incerto")): ("C", "advances"),
-        frozenset(("incluir", "excluir")): ("D", "consensus_required"),
-        frozenset(("incerto", "excluir")): ("E", "consensus_required"),
-        frozenset(("excluir", "excluir")): ("F", "excluded"),
-    }
-    return outcomes[frozenset((first_vote, second_vote))]
+from .roles import Role
+from .search_service import (
+    SEARCH_BASES,
+    TITLE_DUPLICATE_THRESHOLD,
+    TITLE_REVIEW_THRESHOLD,
+    SearchMixin,
+    canonical_preference,
+    validate_boolean_query,
+)
+from .triage import classify_triage_pair
+from .triage_service import TriageMixin
 
 
 @dataclass
@@ -121,7 +110,7 @@ class AuthController:
         return token
 
 
-class AuthService:
+class AuthService(ConfigurationMixin, SearchMixin, QualityMixin, TriageMixin):
     _password_scrypt_n = 2**14
     _password_scrypt_r = 8
     _password_scrypt_p = 1
@@ -585,7 +574,10 @@ class AuthService:
         return membership
 
     @staticmethod
-    def _validate_project_document(kind: str, key: str, data: dict[str, Any]) -> None:
+    def _validate_project_document(kind: str, key: str, data: dict[str, Any]) -> dict[str, Any]:
+        """Validate a configuration version and return the data to store."""
+        if kind in {"search_string", "manual_search"}:
+            raise ValueError(f"{kind} is registered through the search endpoints")
         if kind not in {
             "protocol",
             "criteria",
@@ -595,8 +587,12 @@ class AuthService:
             "hypothesis",
             "verdict_rules",
             "phase",
+            "seminal",
+            "search_base",
+            "qa_instrument",
         }:
             raise ValueError("unsupported configuration kind")
+        data = dict(data)
         if kind == "protocol" and not all(
             isinstance(data.get(field), str) and data[field].strip()
             for field in ("text", "description")
@@ -609,16 +605,29 @@ class AuthService:
         if kind == "glossary":
             if not str(data.get("definition", "")).strip():
                 raise ValueError("glossary term requires a definition")
-            if not data.get("criteria_links") and not data.get("field_links"):
-                raise ValueError("glossary term must link to a criterion or field")
+            # Spec 002 CA-04: a term without links is saved, listed as pending and blocks Portão 0.
+            data["criteria_links"] = list(data.get("criteria_links") or [])
+            data["field_links"] = list(data.get("field_links") or [])
+            if any(not str(link).startswith(("CI", "CE")) for link in data["criteria_links"]):
+                raise ValueError("glossary criteria links must be CI/CE ids")
+            unknown_fields = sorted(set(data["field_links"]) - EXTRACTION_FIELD_IDS)
+            if unknown_fields:
+                raise ValueError(f"unknown extraction field ids: {', '.join(unknown_fields)}")
         if kind == "research_question":
             required = ("text", "motivation", "classification", "classification_justification")
             if not all(str(data.get(field, "")).strip() for field in required):
                 raise ValueError("research question requires text, motivation, classification and justification")
             if data["classification"] not in {"descritiva", "explicativa", "exploratoria", "preditiva"}:
                 raise ValueError("invalid Easterbrook classification")
-            if not data.get("field_links") or not data.get("analysis_links"):
+            if data.get("active", True) is False:
+                # Spec 002 regra 5: RQ is never deleted, only deactivated with justification.
+                if not str(data.get("deactivation_justification", "")).strip():
+                    raise ValueError("deactivating a research question requires a justification")
+            elif not data.get("field_links") or not data.get("analysis_links"):
                 raise ValueError("research question requires field and analysis links")
+            unknown_fields = sorted(set(data.get("field_links") or []) - EXTRACTION_FIELD_IDS)
+            if unknown_fields:
+                raise ValueError(f"unknown extraction field ids: {', '.join(unknown_fields)}")
         if kind == "picoc":
             elements = data.get("elements", {})
             required = {"population", "intervention", "comparison", "outcome", "context"}
@@ -631,11 +640,49 @@ class AuthService:
             if key not in {"H1", "H2"} or any(not data.get(field) for field in required):
                 raise ValueError("hypothesis H1/H2 requires independent/dependent variables and operational criteria")
         if kind == "verdict_rules":
-            required_verdicts = {"suporta", "parcialmente suporta", "refuta", "inconclusivo"}
-            if set(data.get("verdicts", [])) != required_verdicts:
+            if sorted(data.get("verdicts", [])) != sorted(FIXED_VERDICTS):
                 raise ValueError("all four fixed hypothesis verdicts are required")
-        if kind == "phase" and (not str(data.get("name", "")).strip() or int(data.get("duration_weeks", 0)) <= 0):
-            raise ValueError("phase requires a name and positive duration")
+            weighting = data.setdefault("quality_weighting", DEFAULT_QUALITY_WEIGHTING)
+            if set(weighting) != {"high", "moderate"} or any(
+                not isinstance(band.get("weight"), (int, float)) or not 0 < band["weight"] <= 1
+                or not isinstance(band.get("min_score"), (int, float))
+                for band in weighting.values()
+            ):
+                raise ValueError("quality weighting requires high and moderate bands with min_score and 0 < weight <= 1")
+            if set(data.get("operational_criteria", {})) - set(FIXED_VERDICTS):
+                raise ValueError("operational criteria must be keyed by the four fixed verdicts")
+        if kind == "phase":
+            if not str(data.get("name", "")).strip() or float(data.get("duration_weeks", 0)) <= 0:
+                raise ValueError("phase requires a name and positive duration")
+            data["dependencies"] = list(data.get("dependencies") or [])
+            if key in data["dependencies"]:
+                raise ValueError("a phase cannot depend on itself")
+            data["progress_percent"] = float(data.get("progress_percent", 0))
+            if not 0 <= data["progress_percent"] <= 100:
+                raise ValueError("phase progress must be between 0 and 100")
+        if kind == "seminal":
+            if not key.startswith("SX") or not str(data.get("title", "")).strip():
+                raise ValueError("seminal study requires an SX id and title")
+            doi = str(data.get("doi") or "").strip()
+            data["doi"] = re.sub(r"^https?://(?:dx\.)?doi\.org/", "", doi, flags=re.IGNORECASE).casefold() or None
+            if data.get("year") is not None and not isinstance(data["year"], int):
+                raise ValueError("seminal year must be an integer")
+        if kind == "search_base":
+            if key not in SEARCH_BASES:
+                raise ValueError("unknown search base")
+            if "fields" in data and (not isinstance(data["fields"], list) or not data["fields"]):
+                raise ValueError("search base fields must be a non-empty list")
+            if int(data.get("year_from", 2016)) > int(data.get("year_to", 2026)):
+                raise ValueError("search window must start before it ends")
+            limit = data.get("result_limit")
+            if key == "google_scholar" and limit is not None and not 1 <= int(limit) <= 300:
+                raise ValueError("Google Scholar result limit must be between 1 and 300")
+        if kind == "qa_instrument":
+            if key != "default":
+                raise ValueError("the QA instrument key must be default")
+            data.setdefault("min_applicable", 7)
+            validate_instrument(data)
+        return data
 
     def add_project_document(
         self,
@@ -645,11 +692,13 @@ class AuthService:
         kind: str,
         key: str,
         data: dict[str, Any],
+        expected_version: int | None = None,
+        deviation_id: str | None = None,
     ) -> dict[str, Any]:
         payload = self.validate_token(token)
         if self._session_factory is None:
             raise ValueError("project configuration persistence is not configured")
-        self._validate_project_document(kind, key, data)
+        data = self._validate_project_document(kind, key, data)
         with self._session_factory.begin() as database:
             self._require_project_membership(
                 database,
@@ -657,57 +706,55 @@ class AuthService:
                 payload["user_id"],
                 {Role.ADMIN},
             )
-            previous = database.scalar(
-                select(ProjectDocumentRecord)
-                .where(
-                    ProjectDocumentRecord.project_id == project_id,
-                    ProjectDocumentRecord.kind == kind,
-                    ProjectDocumentRecord.document_key == key,
-                )
-                .order_by(ProjectDocumentRecord.version.desc())
-                .limit(1)
-            )
-            version = 1 if previous is None else previous.version + 1
-            diff_text = ""
-            if kind == "protocol" and previous is not None:
-                diff_text = "\n".join(
-                    unified_diff(
-                        str(previous.data["text"]).splitlines(),
-                        str(data["text"]).splitlines(),
-                        fromfile=f"{key}@{previous.version}",
-                        tofile=f"{key}@{version}",
-                        lineterm="",
+            warnings: list[str] = []
+            if kind == "qa_instrument":
+                # Spec 005 CA-01: leaving the protocol instrument is a recorded deviation.
+                deviations = validate_instrument(data)
+                if deviations:
+                    justification = str(data.get("deviation_justification", "")).strip()
+                    if not justification:
+                        raise ValueError(
+                            "QA instrument deviates from the protocol (" + "; ".join(deviations)
+                            + "); deviation_justification is required"
+                        )
+                    deviation = ProtocolDeviationRecord(
+                        id=secrets.token_hex(16),
+                        project_id=project_id,
+                        stage="avaliação de qualidade",
+                        description="; ".join(deviations),
+                        justification=justification,
+                        affected_section="§7.4",
+                        author_user_id=payload["user_id"],
                     )
-                )
-            record = ProjectDocumentRecord(
-                id=secrets.token_hex(16),
+                    database.add(deviation)
+                    self._append_audit(
+                        database,
+                        entity_type="protocol_deviation",
+                        entity_id=deviation.id,
+                        action="protocol_deviation_created",
+                        actor_user_id=payload["user_id"],
+                        previous_value=None,
+                        new_value={"stage": deviation.stage, "affected_section": deviation.affected_section},
+                    )
+                    data["deviation_id"] = deviation.id
+                    warnings.extend(deviations)
+            if kind == "research_question":
+                # Spec 002 §9: RQ reformulated after extraction started alerts on linked fields.
+                started = self._linked_extractions(database, project_id, list(data.get("field_links") or []))
+                if started and key in self._latest_documents(database, project_id, "research_question"):
+                    warnings.append("extraction already started for linked fields: " + ", ".join(started))
+            result = self._store_project_document(
+                database,
                 project_id=project_id,
                 kind=kind,
-                document_key=key,
-                version=version,
+                key=key,
                 data=data,
-                created_by=payload["user_id"],
+                user_id=payload["user_id"],
+                expected_version=expected_version,
+                deviation_id=deviation_id,
             )
-            database.add(record)
-            self._append_audit(
-                database,
-                entity_type=kind,
-                entity_id=record.id,
-                action="configuration_version_created",
-                actor_user_id=payload["user_id"],
-                previous_value=None if previous is None else {"version": previous.version},
-                new_value={"key": key, "version": version},
-            )
-            return {
-                "id": record.id,
-                "project_id": project_id,
-                "kind": kind,
-                "key": key,
-                "version": version,
-                "data": data,
-                "created_by": payload["user_id"],
-                "diff": diff_text,
-            }
+            result["warnings"] = warnings
+            return result
 
     def list_project_documents(
         self,
@@ -823,23 +870,7 @@ class AuthService:
 
     @staticmethod
     def _validate_boolean_query(query: str) -> None:
-        if not query.strip():
-            raise ValueError("search query is required")
-        open_parentheses: list[int] = []
-        in_quote = False
-        for position, character in enumerate(query):
-            if character == '"':
-                in_quote = not in_quote
-            elif not in_quote and character == "(":
-                open_parentheses.append(position)
-            elif not in_quote and character == ")":
-                if not open_parentheses:
-                    raise ValueError(f"unmatched closing parenthesis at position {position}")
-                open_parentheses.pop()
-        if in_quote:
-            raise ValueError("unmatched quote in search query")
-        if open_parentheses:
-            raise ValueError(f"unmatched opening parenthesis at position {open_parentheses[-1]}")
+        validate_boolean_query(query)
 
     def create_search_execution(
         self,
@@ -847,21 +878,18 @@ class AuthService:
         project_id: str,
         *,
         base: str,
-        query: str,
-        fields: list[str],
+        reported_result_count: int,
+        fields: list[str] | None = None,
         result_limit: int | None = None,
+        executed_at: datetime | None = None,
     ) -> dict[str, Any]:
         payload = self.validate_token(token)
         if self._session_factory is None:
             raise ValueError("search persistence is not configured")
-        allowed_bases = {"web_of_science", "scopus", "ieee", "acm", "google_scholar", "arxiv"}
-        if base not in allowed_bases:
+        if base not in SEARCH_BASES:
             raise ValueError("unsupported search base")
-        self._validate_boolean_query(query)
-        if not fields:
-            raise ValueError("searched fields are required")
-        if base == "google_scholar" and (result_limit is None or not 1 <= result_limit <= 300):
-            raise ValueError("Google Scholar result limit must be between 1 and 300")
+        if reported_result_count < 0:
+            raise ValueError("reported result count cannot be negative")
 
         record_id = secrets.token_hex(16)
         with self._session_factory.begin() as database:
@@ -871,14 +899,30 @@ class AuthService:
                 payload["user_id"],
                 {Role.ADMIN, Role.REVISOR},
             )
+            config = self._base_configuration(database, project_id)[base]
+            # Spec 003 CA-02: a base without an adapted string cannot register executions.
+            if config["search_string_version"] is None:
+                raise ValueError(f"base {base} has no adapted search string; register it before the execution")
+            fields = fields or config["fields"]
+            if config["result_limit"] is not None:
+                result_limit = config["result_limit"] if result_limit is None else result_limit
+                if not 1 <= result_limit <= config["result_limit"]:
+                    raise ValueError(
+                        f"{config['name']} result limit must be between 1 and {config['result_limit']}"
+                    )
             database.add(
                 SearchExecutionRecord(
                     id=record_id,
                     project_id=project_id,
                     base=base,
-                    query=query.strip(),
+                    query=config["adapted_query"],
                     fields=fields,
                     result_limit=result_limit,
+                    search_string_version=config["search_string_version"],
+                    year_from=config["year_from"],
+                    year_to=config["year_to"],
+                    reported_result_count=reported_result_count,
+                    executed_at=executed_at or datetime.now(timezone.utc),
                     created_by=payload["user_id"],
                 )
             )
@@ -889,15 +933,24 @@ class AuthService:
                 action="search_execution_created",
                 actor_user_id=payload["user_id"],
                 previous_value=None,
-                new_value={"base": base, "fields": fields},
+                new_value={
+                    "base": base,
+                    "fields": fields,
+                    "search_string_version": config["search_string_version"],
+                    "reported_result_count": reported_result_count,
+                },
             )
         return {
             "id": record_id,
             "project_id": project_id,
             "base": base,
-            "query": query.strip(),
+            "query": config["adapted_query"],
+            "search_string_version": config["search_string_version"],
             "fields": fields,
+            "year_from": config["year_from"],
+            "year_to": config["year_to"],
             "result_limit": result_limit,
+            "reported_result_count": reported_result_count,
         }
 
     def import_search_results(
@@ -908,18 +961,9 @@ class AuthService:
         file_name: str,
         content: bytes,
     ) -> dict[str, Any]:
-        from .importers import parse_records
-
         payload = self.validate_token(token)
-        if len(content) > 50 * 1024 * 1024:
-            raise ValueError("import file exceeds the 50 MiB limit")
-        parsed_records = parse_records(content, file_name)
         if self._session_factory is None:
             raise ValueError("search persistence is not configured")
-
-        raw_import_id = secrets.token_hex(16)
-        content_hash = hashlib.sha256(content).hexdigest()
-        study_ids: list[str] = []
         with self._session_factory.begin() as database:
             execution = database.get(SearchExecutionRecord, search_execution_id)
             if execution is None:
@@ -930,55 +974,15 @@ class AuthService:
                 payload["user_id"],
                 {Role.ADMIN, Role.REVISOR},
             )
-            database.add(
-                RawImportRecord(
-                    id=raw_import_id,
-                    search_execution_id=search_execution_id,
-                    file_name=file_name,
-                    content_hash_sha256=content_hash,
-                    content=content,
-                    imported_count=len(parsed_records),
-                    imported_by=payload["user_id"],
-                )
-            )
-            for parsed in parsed_records:
-                study_id = f"s-{secrets.token_hex(12)}"
-                study_ids.append(study_id)
-                database.add(
-                    StudyRecord(
-                        id=study_id,
-                        project_id=execution.project_id,
-                        search_execution_id=search_execution_id,
-                        raw_import_id=raw_import_id,
-                        title=parsed["title"],
-                        normalized_title=parsed["normalized_title"],
-                        authors=parsed["authors"],
-                        year=parsed["year"],
-                        venue=parsed["venue"],
-                        doi=parsed["doi"],
-                        abstract=parsed["abstract"],
-                        keywords=parsed["keywords"],
-                        source=execution.base,
-                        imported_by=payload["user_id"],
-                    )
-                )
-            self._append_audit(
+            return self._import_records(
                 database,
-                entity_type="raw_import",
-                entity_id=raw_import_id,
-                action="raw_results_imported",
-                actor_user_id=payload["user_id"],
-                previous_value=None,
-                new_value={"file_name": file_name, "sha256": content_hash, "record_count": len(parsed_records)},
+                project_id=execution.project_id,
+                file_name=file_name,
+                content=content,
+                user_id=payload["user_id"],
+                source=execution.base,
+                search_execution_id=search_execution_id,
             )
-        return {
-            "id": raw_import_id,
-            "search_execution_id": search_execution_id,
-            "raw_sha256": content_hash,
-            "imported_count": len(study_ids),
-            "study_ids": study_ids,
-            "anomalies": [],
-        }
 
     def list_project_studies(self, token: str, project_id: str) -> list[dict[str, Any]]:
         payload = self.validate_token(token)
@@ -989,27 +993,7 @@ class AuthService:
             studies = database.scalars(
                 select(StudyRecord).where(StudyRecord.project_id == project_id).order_by(StudyRecord.created_at)
             ).all()
-            decisions = database.scalars(
-                select(DuplicateDecisionRecord)
-                .join(DuplicateCandidateRecord, DuplicateCandidateRecord.id == DuplicateDecisionRecord.candidate_id)
-                .where(DuplicateCandidateRecord.project_id == project_id)
-                .order_by(DuplicateDecisionRecord.created_at)
-            ).all()
-            duplicate_of: dict[str, str] = {}
-            for decision in decisions:
-                candidate = database.get(DuplicateCandidateRecord, decision.candidate_id)
-                if candidate is None:
-                    continue
-                if decision.decision == "duplicate" and decision.canonical_study_id:
-                    duplicate_id = (
-                        candidate.study_id_b
-                        if candidate.study_id_a == decision.canonical_study_id
-                        else candidate.study_id_a
-                    )
-                    duplicate_of[duplicate_id] = decision.canonical_study_id
-                elif decision.decision == "independent":
-                    duplicate_of.pop(candidate.study_id_a, None)
-                    duplicate_of.pop(candidate.study_id_b, None)
+            duplicate_of, _ = self._duplicate_groups(database, project_id)
             return [
                 {
                     "id": study.id,
@@ -1021,6 +1005,10 @@ class AuthService:
                     "abstract": study.abstract,
                     "keywords": study.keywords,
                     "source": study.source,
+                    "origin": study.origin,
+                    "publication_type": study.publication_type,
+                    "search_execution_id": study.search_execution_id,
+                    "snowball_round_id": study.snowball_round_id,
                     "duplicate_of": duplicate_of.get(study.id),
                 }
                 for study in studies
@@ -1046,50 +1034,54 @@ class AuthService:
                     select(DuplicateCandidateRecord).where(DuplicateCandidateRecord.project_id == project_id)
                 ).all()
             }
-            new_candidates: list[DuplicateCandidateRecord] = []
-            for index, study in enumerate(studies):
-                remaining_studies = studies[index + 1 :]
-                match_scores: dict[str, tuple[float, str]] = {}
+            match_scores: dict[tuple[str, str], tuple[float, str]] = {}
+            by_doi: dict[str, list[str]] = {}
+            for study in studies:
                 if study.doi:
-                    for other in remaining_studies:
-                        if other.doi == study.doi:
-                            match_scores[other.id] = (1.0, "doi_exact")
-                remaining = {
-                    other.id: other.normalized_title
-                    for other in remaining_studies
-                    if other.normalized_title
-                }
-                matches = process.extract(
-                    study.normalized_title,
-                    remaining,
+                    by_doi.setdefault(study.doi, []).append(study.id)
+            for study_ids in by_doi.values():
+                for index, first_id in enumerate(study_ids):
+                    for second_id in study_ids[index + 1 :]:
+                        match_scores[tuple(sorted((first_id, second_id)))] = (1.0, "doi_exact")
+            titled = [study for study in studies if study.normalized_title]
+            titles = [study.normalized_title for study in titled]
+            # Row blocks keep memory bounded for 5,000 records (RNF10); float32 keeps the exact
+            # score, since an integer dtype would round 89.9 up across the 0.90 threshold.
+            block_size = 500
+            for block_start in range(0, len(titles), block_size):
+                similarity_block = process.cdist(
+                    titles[block_start : block_start + block_size],
+                    titles,
                     scorer=fuzz.ratio,
-                    score_cutoff=85,
-                    limit=None,
-                ) if study.normalized_title else []
-                for _, score, other_id in matches:
-                    if other_id in match_scores:
+                    score_cutoff=TITLE_REVIEW_THRESHOLD * 100,
+                    dtype=np.float32,
+                    workers=-1,
+                )
+                for row, column in np.argwhere(similarity_block > 0):
+                    first_index = block_start + int(row)
+                    if int(column) <= first_index:
                         continue
-                    similarity = score / 100
-                    match_type = "title_similarity" if similarity >= 0.90 else "manual_review"
-                    match_scores[other_id] = (similarity, match_type)
-                for other_id, (similarity, match_type) in match_scores.items():
-                    other = next(item for item in remaining_studies if item.id == other_id)
-                    pair = tuple(sorted((study.id, other.id)))
-                    if pair in existing:
+                    pair = tuple(sorted((titled[first_index].id, titled[int(column)].id)))
+                    if pair in match_scores:
                         continue
-                    new_candidates.append(
-                        DuplicateCandidateRecord(
-                            id=secrets.token_hex(16),
-                            project_id=project_id,
-                            study_id_a=pair[0],
-                            study_id_b=pair[1],
-                            match_type=match_type,
-                            similarity=similarity,
-                        )
-                    )
-                    existing.add(pair)
-            database.add_all(new_candidates)
-            for candidate in new_candidates:
+                    similarity = round(float(similarity_block[row, column]) / 100, 4)
+                    match_type = "title_similarity" if similarity >= TITLE_DUPLICATE_THRESHOLD else "manual_review"
+                    match_scores[pair] = (similarity, match_type)
+
+            studies_by_id = {study.id: study for study in studies}
+            for pair, (similarity, match_type) in sorted(match_scores.items()):
+                if pair in existing:
+                    continue
+                candidate = DuplicateCandidateRecord(
+                    id=secrets.token_hex(16),
+                    project_id=project_id,
+                    study_id_a=pair[0],
+                    study_id_b=pair[1],
+                    match_type=match_type,
+                    similarity=similarity,
+                )
+                database.add(candidate)
+                existing.add(pair)
                 self._append_audit(
                     database,
                     entity_type="duplicate_candidate",
@@ -1098,6 +1090,29 @@ class AuthService:
                     actor_user_id=payload["user_id"],
                     previous_value=None,
                     new_value={"match_type": candidate.match_type, "similarity": candidate.similarity},
+                )
+                if match_type != "doi_exact":
+                    continue
+                # Spec 003 regra 4: DOI exato marca a duplicidade automaticamente (editável pelo R1).
+                canonical = max((studies_by_id[pair[0]], studies_by_id[pair[1]]), key=canonical_preference)
+                decision = DuplicateDecisionRecord(
+                    id=secrets.token_hex(16),
+                    candidate_id=candidate.id,
+                    decision="duplicate",
+                    canonical_study_id=canonical.id,
+                    justification="Decisão automática: DOI idêntico (spec 003, regra 4).",
+                    method="automatic",
+                    decided_by=payload["user_id"],
+                )
+                database.add(decision)
+                self._append_audit(
+                    database,
+                    entity_type="duplicate_candidate",
+                    entity_id=candidate.id,
+                    action="duplicate_decision_recorded",
+                    actor_user_id=payload["user_id"],
+                    previous_value=None,
+                    new_value={"decision": "duplicate", "canonical_study_id": canonical.id, "method": "automatic"},
                 )
         return self.list_duplicate_candidates(token, project_id)
 
@@ -1110,23 +1125,28 @@ class AuthService:
             candidates = database.scalars(
                 select(DuplicateCandidateRecord)
                 .where(DuplicateCandidateRecord.project_id == project_id)
-                .order_by(DuplicateCandidateRecord.created_at)
+                .order_by(DuplicateCandidateRecord.created_at, DuplicateCandidateRecord.id)
             ).all()
+            latest = self._latest_duplicate_decisions(database, project_id)
+            studies = {
+                study.id: study
+                for study in database.scalars(select(StudyRecord).where(StudyRecord.project_id == project_id)).all()
+            }
             output: list[dict[str, Any]] = []
             for candidate in candidates:
-                decision = database.scalar(
-                    select(DuplicateDecisionRecord)
-                    .where(DuplicateDecisionRecord.candidate_id == candidate.id)
-                    .order_by(DuplicateDecisionRecord.created_at.desc())
-                    .limit(1)
-                )
+                decision = latest.get(candidate.id)
                 output.append(
                     {
                         "id": candidate.id,
                         "study_ids": [candidate.study_id_a, candidate.study_id_b],
                         "match_type": candidate.match_type,
                         "similarity": candidate.similarity,
+                        "suggested_canonical_study_id": max(
+                            (studies[candidate.study_id_a], studies[candidate.study_id_b]),
+                            key=canonical_preference,
+                        ).id,
                         "decision": None if decision is None else decision.decision,
+                        "method": None if decision is None else decision.method,
                         "canonical_study_id": None if decision is None else decision.canonical_study_id,
                         "justification": None if decision is None else decision.justification,
                     }
@@ -1172,6 +1192,7 @@ class AuthService:
                 decision=decision,
                 canonical_study_id=canonical_study_id,
                 justification=justification.strip(),
+                method="manual",
                 decided_by=payload["user_id"],
             )
             database.add(record)
@@ -1375,6 +1396,16 @@ class AuthService:
                         "result": matrix_result,
                     }
                 )
+                state = self._triage_state(database, project_id, study_id, phase)
+                if state is not None:
+                    result.update(
+                        {
+                            "status": state["status"],
+                            "final_result": state["final_result"],
+                            "consensus": state.get("consensus"),
+                            "arbitration": state.get("arbitration"),
+                        }
+                    )
             return result
 
     def submit_quality_assessment(
@@ -1398,7 +1429,6 @@ class AuthService:
             if not str(item.get("justification", "")).strip():
                 raise ValueError(f"{criterion_id} requires a justification")
             score_map[criterion_id] = item.get("score")
-        result = calculate_quality_scores(score_map)
         normalized_scores = [
             {
                 "criterion_id": item["criterion_id"],
@@ -1418,17 +1448,10 @@ class AuthService:
             study = database.get(StudyRecord, study_id)
             if study is None or study.project_id != project_id:
                 raise LookupError("study not found in project")
-            assigned_reviewers = database.scalars(
-                select(ProjectMembershipRecord.user_id)
-                .where(
-                    ProjectMembershipRecord.project_id == project_id,
-                    ProjectMembershipRecord.role == Role.REVISOR.value,
-                )
-                .order_by(ProjectMembershipRecord.user_id)
-                .limit(2)
-            ).all()
-            if membership.user_id not in assigned_reviewers:
+            if membership.user_id not in self._assigned_reviewers(database, project_id):
                 raise PermissionError("403: reviewer is not assigned to this QA pair")
+            instrument, instrument_version = self._project_instrument(database, project_id)
+            result = calculate_quality_scores(score_map, instrument)
             current = database.scalar(
                 select(QualityAssessmentRecord)
                 .where(
@@ -1452,6 +1475,7 @@ class AuthService:
                     classification=result["classification"],
                     confirmed=confirm,
                     version=1,
+                    instrument_version=instrument_version,
                     created_at=datetime.now(timezone.utc),
                     updated_at=datetime.now(timezone.utc),
                 )
@@ -1468,9 +1492,20 @@ class AuthService:
                 current.category_scores = result["category_scores"]
                 current.classification = result["classification"]
                 current.confirmed = confirm
+                current.instrument_version = instrument_version
                 current.version += 1
                 current.updated_at = datetime.now(timezone.utc)
                 record = current
+            if confirm and record.initial_scores is None:
+                # Spec 005 regra 11: the first confirmed ratings feed the initial kappa and never change.
+                record.initial_scores = normalized_scores
+            new_value: dict[str, Any] = {
+                "score": result["score"],
+                "classification": result["classification"],
+                "scores": normalized_scores,
+            }
+            if previous_value is not None and record.reopen_justification:
+                new_value["justification"] = record.reopen_justification
             self._append_audit(
                 database,
                 entity_type="quality_assessment",
@@ -1478,7 +1513,7 @@ class AuthService:
                 action="quality_assessment_confirmed" if confirm else "quality_assessment_saved",
                 actor_user_id=payload["user_id"],
                 previous_value=previous_value,
-                new_value={"score": result["score"], "classification": result["classification"]},
+                new_value=new_value,
             )
             response = {
                 "id": record.id,
@@ -1487,6 +1522,7 @@ class AuthService:
                 "score": result["score"],
                 "category_scores": result["category_scores"],
                 "classification": result["classification"],
+                "outcome": result["outcome"],
                 "applicable_count": result["applicable_count"],
                 "not_applicable_count": result["not_applicable_count"],
                 "confirmed": confirm,
@@ -1503,31 +1539,11 @@ class AuthService:
             study = database.get(StudyRecord, study_id)
             if study is None or study.project_id != project_id:
                 raise LookupError("study not found in project")
-            reviewer_ids = database.scalars(
-                select(ProjectMembershipRecord.user_id)
-                .where(
-                    ProjectMembershipRecord.project_id == project_id,
-                    ProjectMembershipRecord.role == Role.REVISOR.value,
-                )
-                .order_by(ProjectMembershipRecord.user_id)
-                .limit(2)
-            ).all()
-            assessments = database.scalars(
-                select(QualityAssessmentRecord).where(
-                    QualityAssessmentRecord.project_id == project_id,
-                    QualityAssessmentRecord.study_id == study_id,
-                    QualityAssessmentRecord.reviewer_user_id.in_(reviewer_ids),
-                )
-            ).all()
-            assessments_by_user = {assessment.reviewer_user_id: assessment for assessment in assessments}
+            reviewer_ids, assessments_by_user = self._quality_pair(database, project_id, study_id)
             own = assessments_by_user.get(payload["user_id"])
             peer_id = next((user_id for user_id in reviewer_ids if user_id != payload["user_id"]), None)
             peer = assessments_by_user.get(peer_id) if peer_id else None
-            both_confirmed = len(reviewer_ids) == 2 and all(
-                assessments_by_user.get(user_id) is not None
-                and assessments_by_user[user_id].confirmed
-                for user_id in reviewer_ids
-            )
+            consensus = self._quality_consensus(database, project_id, study_id, reviewer_ids, assessments_by_user)
             response: dict[str, Any] = {
                 "study_id": study_id,
                 "own_assessment": None if own is None else {
@@ -1535,41 +1551,50 @@ class AuthService:
                     "category_scores": own.category_scores,
                     "classification": own.classification,
                     "confirmed": own.confirmed,
+                    "version": own.version,
                 },
                 "peer_status": "confirmed" if peer is not None and peer.confirmed else "awaiting",
             }
-            if both_confirmed and own is not None and peer is not None:
-                own_scores = {item["criterion_id"]: item["score"] for item in own.scores}
-                peer_scores = {item["criterion_id"]: item["score"] for item in peer.scores}
+            if consensus is not None:
+                first, second = (assessments_by_user[user_id] for user_id in reviewer_ids)
+                first_scores, second_scores = _score_map(first.scores), _score_map(second.scores)
                 shared_ids = [
                     criterion_id
-                    for criterion_id in QA_CATEGORIES
-                    if own_scores.get(criterion_id) is not None and peer_scores.get(criterion_id) is not None
+                    for criterion_id in first_scores
+                    if first_scores[criterion_id] is not None and second_scores.get(criterion_id) is not None
                 ]
                 kappa = calculate_weighted_kappa(
-                    [own_scores[criterion_id] for criterion_id in shared_ids],
-                    [peer_scores[criterion_id] for criterion_id in shared_ids],
+                    [first_scores[criterion_id] for criterion_id in shared_ids],
+                    [second_scores[criterion_id] for criterion_id in shared_ids],
                 )
-                disputed = [
-                    criterion_id
-                    for criterion_id in shared_ids
-                    if abs(own_scores[criterion_id] - peer_scores[criterion_id]) > 0.5
-                ]
+                visible_peer = peer if peer is not None else second
                 response.update(
                     {
                         "peer_assessment": {
-                            "score": peer.score,
-                            "category_scores": peer.category_scores,
-                            "classification": peer.classification,
-                            "scores": peer.scores,
+                            "reviewer_user_id": visible_peer.reviewer_user_id,
+                            "score": visible_peer.score,
+                            "category_scores": visible_peer.category_scores,
+                            "classification": visible_peer.classification,
+                            "scores": visible_peer.scores,
                         },
                         "weighted_kappa": kappa,
-                        "kappa_warning": kappa is not None and kappa < 0.6,
-                        "disputed_criteria": disputed,
-                        "arbitration_required": bool(disputed),
-                        "final_score": round((own.score + peer.score) / 2, 4),
+                        "kappa_warning": kappa is not None and kappa < KAPPA_WARNING_THRESHOLD,
+                        "disputed_criteria": consensus["disputed_criteria"],
+                        "pending_arbitration": consensus["pending_arbitration"],
+                        "arbitration_required": bool(consensus["pending_arbitration"]),
+                        "status": consensus["status"],
+                        "final_score": consensus.get("score"),
+                        "final_category_scores": consensus.get("category_scores"),
+                        "final_classification": consensus.get("classification"),
+                        "final_outcome": consensus.get("outcome"),
                     }
                 )
+                if payload["user_id"] not in reviewer_ids:
+                    # Third reviewer, admin and observer see both sides once both confirmed.
+                    response["assessments"] = [
+                        {"reviewer_user_id": item.reviewer_user_id, "scores": item.scores, "score": item.score}
+                        for item in (first, second)
+                    ]
             return response
 
     def create_extraction(
@@ -2026,4 +2051,5 @@ __all__ = [
     "classify_triage_pair",
     "calculate_quality_scores",
     "calculate_weighted_kappa",
+    "validate_boolean_query",
 ]

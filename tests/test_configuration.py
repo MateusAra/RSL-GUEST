@@ -72,7 +72,7 @@ def test_configuration_validates_glossary_picoc_hypotheses_and_verdicts():
         invalid_glossary = client.post(
             f"{prefix}/glossary/MAS",
             headers=headers,
-            json={"data": {"definition": "Sistema multiagente."}},
+            json={"data": {"criteria_links": ["CI1"]}},
         )
         assert invalid_glossary.status_code == 422
 

@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
 from backend.api import app
+from tests.helpers import create_execution
 
 
 RIS_STUDY = b"""TY  - JOUR
@@ -32,11 +33,7 @@ def _create_project_and_study(client: TestClient) -> tuple[str, str]:
             ],
         },
     ).json()
-    execution = client.post(
-        f"/api/v1/projects/{project['id']}/search-executions",
-        headers=headers,
-        json={"base": "scopus", "query": "XAI AND MAS", "fields": ["title"]},
-    ).json()
+    execution = create_execution(client, project['id'], headers)
     imported = client.post(
         f"/api/v1/search-executions/{execution['id']}/imports",
         headers=headers,

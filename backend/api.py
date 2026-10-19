@@ -5,11 +5,13 @@ import sys
 import csv
 import json
 from io import StringIO
+from collections.abc import Callable
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, File, Header, HTTPException, Response, UploadFile, status
+from fastapi import FastAPI, File, Form, Header, HTTPException, Response, UploadFile, status
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from alembic import command
@@ -48,6 +50,20 @@ def permission_http_status(error: PermissionError) -> int:
     return 401 if str(error).startswith("401:") else 403
 
 
+def call_service(authorization: str | None, operation: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    """Run a service call with the bearer token and map domain errors to HTTP status codes."""
+    token = get_token_from_header(authorization)
+    try:
+        return operation(token, *args, **kwargs)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=permission_http_status(exc), detail=str(exc)) from exc
+    except ValueError as exc:
+        status_code = 409 if str(exc).startswith("409:") else 422
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+
+
 class LoginRequest(BaseModel):
     email: str
     password: str
@@ -77,6 +93,8 @@ class ProjectCreateRequest(BaseModel):
 
 class ProjectDocumentRequest(BaseModel):
     data: dict[str, Any]
+    expected_version: int | None = None
+    deviation_id: str | None = None
 
 
 class ProtocolDeviationRequest(BaseModel):
@@ -88,9 +106,47 @@ class ProtocolDeviationRequest(BaseModel):
 
 class SearchExecutionRequest(BaseModel):
     base: str
-    query: str
-    fields: list[str]
+    reported_result_count: int
+    fields: list[str] | None = None
     result_limit: int | None = None
+    executed_at: datetime | None = None
+
+
+class SearchStringRequest(BaseModel):
+    query: str
+    justification: str
+    deviation_id: str | None = None
+    expected_version: int | None = None
+
+
+class ManualSearchRequest(BaseModel):
+    venue: str
+    year_from: int | None = None
+    year_to: int | None = None
+    unswept_editions: list[str] = Field(default_factory=list)
+    notes: str = ""
+    expected_version: int | None = None
+
+
+class GateConfirmRequest(BaseModel):
+    deviation_id: str | None = None
+
+
+class TriageResolutionRequest(BaseModel):
+    phase: int
+    decision: str
+    criterion_id: str | None = None
+    justification: str
+
+
+class QualityReopenRequest(BaseModel):
+    justification: str
+
+
+class QualityArbitrationRequest(BaseModel):
+    criterion_id: str
+    score: float | None
+    justification: str
 
 
 class DuplicateDecisionRequest(BaseModel):
@@ -322,19 +378,66 @@ def add_project_configuration(
     payload: ProjectDocumentRequest,
     authorization: str | None = Header(default=None),
 ) -> dict[str, Any]:
-    token = get_token_from_header(authorization)
-    try:
-        return service.add_project_document(
-            token,
-            project_id,
-            kind=kind,
-            key=document_key,
-            data=payload.data,
-        )
-    except PermissionError as exc:
-        raise HTTPException(status_code=permission_http_status(exc), detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return call_service(
+        authorization,
+        service.add_project_document,
+        project_id,
+        kind=kind,
+        key=document_key,
+        data=payload.data,
+        expected_version=payload.expected_version,
+        deviation_id=payload.deviation_id,
+    )
+
+
+@app.get("/api/v1/projects/{project_id}/configuration/{kind}/{document_key}/diff")
+def get_configuration_diff(
+    project_id: str,
+    kind: str,
+    document_key: str,
+    from_version: int,
+    to_version: int,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    return call_service(
+        authorization,
+        service.get_configuration_diff,
+        project_id,
+        kind=kind,
+        key=document_key,
+        from_version=from_version,
+        to_version=to_version,
+    )
+
+
+@app.get("/api/v1/projects/{project_id}/configuration-integrity")
+def get_configuration_integrity(project_id: str, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    return call_service(authorization, service.get_configuration_integrity, project_id)
+
+
+@app.get("/api/v1/projects/{project_id}/analysis-configuration")
+def get_analysis_configuration(project_id: str, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    return call_service(authorization, service.get_analysis_configuration, project_id)
+
+
+@app.get("/api/v1/projects/{project_id}/schedule")
+def get_schedule(project_id: str, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    return call_service(authorization, service.get_schedule, project_id)
+
+
+@app.get("/api/v1/projects/{project_id}/gates")
+def list_gates(project_id: str, authorization: str | None = Header(default=None)) -> list[dict[str, Any]]:
+    return call_service(authorization, service.list_gates, project_id)
+
+
+@app.post("/api/v1/projects/{project_id}/gates/{gate}/confirm", status_code=201)
+def confirm_gate(
+    project_id: str,
+    gate: int,
+    payload: GateConfirmRequest,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    return call_service(authorization, service.confirm_gate, project_id, gate, deviation_id=payload.deviation_id)
 
 
 @app.get("/api/v1/projects/{project_id}/configuration")
@@ -377,6 +480,21 @@ def list_protocol_deviations(
         raise HTTPException(status_code=permission_http_status(exc), detail=str(exc)) from exc
 
 
+@app.get("/api/v1/projects/{project_id}/deviations/export")
+def export_protocol_deviations(
+    project_id: str,
+    format: str = "csv",
+    authorization: str | None = Header(default=None),
+) -> Response:
+    content, media_type = call_service(authorization, service.export_protocol_deviations, project_id, format)
+    extension = "csv" if media_type == "text/csv" else "json"
+    return Response(
+        content,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="desvios-{project_id}.{extension}"'},
+    )
+
+
 @app.post("/api/v1/projects/{project_id}/search-executions", status_code=201)
 def create_search_execution(
     project_id: str,
@@ -413,6 +531,80 @@ async def import_search_results(
         raise HTTPException(status_code=permission_http_status(exc), detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/api/v1/projects/{project_id}/search-bases")
+def get_search_bases(project_id: str, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    return call_service(authorization, service.get_search_bases, project_id)
+
+
+@app.post("/api/v1/projects/{project_id}/search-strings/{base_key}", status_code=201)
+def save_search_string(
+    project_id: str,
+    base_key: str,
+    payload: SearchStringRequest,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    return call_service(authorization, service.save_search_string, project_id, base_key, **payload.model_dump())
+
+
+@app.get("/api/v1/projects/{project_id}/search-validation")
+def get_search_validation(project_id: str, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    return call_service(authorization, service.get_search_validation, project_id)
+
+
+@app.post("/api/v1/projects/{project_id}/manual-searches", status_code=201)
+def register_manual_search(
+    project_id: str,
+    payload: ManualSearchRequest,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    return call_service(authorization, service.register_manual_search, project_id, **payload.model_dump())
+
+
+@app.get("/api/v1/projects/{project_id}/manual-searches")
+def list_manual_searches(project_id: str, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    return call_service(authorization, service.list_manual_searches, project_id)
+
+
+@app.post("/api/v1/projects/{project_id}/snowball-rounds", status_code=201)
+def open_snowball_round(project_id: str, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    return call_service(authorization, service.open_snowball_round, project_id)
+
+
+@app.get("/api/v1/projects/{project_id}/snowball-rounds")
+def list_snowball_rounds(project_id: str, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    return call_service(authorization, service.list_snowball_rounds, project_id)
+
+
+@app.post("/api/v1/snowball-rounds/{round_id}/imports", status_code=201)
+async def import_snowball_candidates(
+    round_id: str,
+    direction: str = Form(...),
+    base: str = Form(...),
+    file: UploadFile = File(...),
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    content = await file.read(50 * 1024 * 1024 + 1)
+    return call_service(
+        authorization,
+        service.import_snowball_candidates,
+        round_id,
+        direction=direction,
+        base=base,
+        file_name=file.filename or "import",
+        content=content,
+    )
+
+
+@app.post("/api/v1/snowball-rounds/{round_id}/close")
+def close_snowball_round(round_id: str, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    return call_service(authorization, service.close_snowball_round, round_id)
+
+
+@app.get("/api/v1/projects/{project_id}/deduplication/summary")
+def get_deduplication_summary(project_id: str, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    return call_service(authorization, service.get_deduplication_summary, project_id)
 
 
 @app.get("/api/v1/projects/{project_id}/studies")
@@ -545,6 +737,69 @@ def get_quality_status(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except PermissionError as exc:
         raise HTTPException(status_code=permission_http_status(exc), detail=str(exc)) from exc
+
+
+@app.post("/api/v1/projects/{project_id}/studies/{study_id}/triage-consensus", status_code=201)
+def submit_triage_consensus(
+    project_id: str,
+    study_id: str,
+    payload: TriageResolutionRequest,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    return call_service(authorization, service.submit_triage_consensus, project_id, study_id, **payload.model_dump())
+
+
+@app.post("/api/v1/projects/{project_id}/studies/{study_id}/triage-arbitration", status_code=201)
+def submit_triage_arbitration(
+    project_id: str,
+    study_id: str,
+    payload: TriageResolutionRequest,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    return call_service(authorization, service.submit_triage_arbitration, project_id, study_id, **payload.model_dump())
+
+
+@app.get("/api/v1/projects/{project_id}/triage/conflicts")
+def list_triage_conflicts(
+    project_id: str,
+    phase: int = 1,
+    authorization: str | None = Header(default=None),
+) -> list[dict[str, Any]]:
+    return call_service(authorization, service.list_triage_conflicts, project_id, phase=phase)
+
+
+@app.post("/api/v1/projects/{project_id}/studies/{study_id}/quality-assessments/reopen")
+def reopen_quality_assessment(
+    project_id: str,
+    study_id: str,
+    payload: QualityReopenRequest,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    return call_service(
+        authorization, service.reopen_quality_assessment, project_id, study_id, justification=payload.justification
+    )
+
+
+@app.post("/api/v1/projects/{project_id}/studies/{study_id}/quality-arbitrations", status_code=201)
+def submit_quality_arbitration(
+    project_id: str,
+    study_id: str,
+    payload: QualityArbitrationRequest,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    return call_service(
+        authorization, service.submit_quality_arbitration, project_id, study_id, **payload.model_dump()
+    )
+
+
+@app.get("/api/v1/projects/{project_id}/quality/instrument")
+def get_quality_instrument(project_id: str, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    return call_service(authorization, service.get_quality_instrument, project_id)
+
+
+@app.get("/api/v1/projects/{project_id}/quality/summary")
+def get_quality_summary(project_id: str, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    return call_service(authorization, service.get_quality_summary, project_id)
 
 
 @app.post("/api/v1/projects/{project_id}/studies/{study_id}/extractions", status_code=201)

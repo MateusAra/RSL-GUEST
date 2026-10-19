@@ -2,6 +2,7 @@ from fastapi.testclient import TestClient
 import pytest
 
 from backend.api import app
+from tests.helpers import create_execution
 from rsl_foundation import classify_triage_pair
 
 
@@ -50,11 +51,7 @@ def test_peer_vote_is_hidden_until_both_reviewers_confirm():
         )
         assert criterion.status_code == 201
 
-        execution = client.post(
-            f"/api/v1/projects/{project_id}/search-executions",
-            headers=admin_headers,
-            json={"base": "scopus", "query": "XAI AND MAS", "fields": ["title"]},
-        ).json()
+        execution = create_execution(client, project_id, admin_headers)
         imported = client.post(
             f"/api/v1/search-executions/{execution['id']}/imports",
             headers=admin_headers,

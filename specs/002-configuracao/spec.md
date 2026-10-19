@@ -131,7 +131,8 @@ Fonte: `docs/fonte/Protocolo_RSL_XAI_MAS_v4.docx` (versão 4.0, 29/09/2026, alin
 ## 11. Pontos em aberto
 - **Resolvido pelo PO:** a carga inicial do Protocolo v4.0 será por script revisado; edições posteriores ocorrerão pelos formulários.
 - **Resolvido pelo PO:** ponderação por faixa: score ≥ 7,0 recebe peso 1,0; score 4,0–6,9 recebe peso 0,5 e também será reportado separadamente. As distribuições sem ponderação também serão exibidas.
-- `[ESCLARECER 3]` O cronograma (RF04) é apenas visualização ou também bloqueia fases? O v4.0 diz que é "indicativo" (§14.4), o que aponta para só visualização. Os bloqueios reais vêm dos portões (κ da pilotagem, registro no OSF).
+- ~~`[ESCLARECER 3]`~~ **Decidido em 19/10/2026 (aguarda validação do PO):** o cronograma (RF04) é só visualização: mostra % concluído e dependências pendentes, sem bloquear fases. Os bloqueios reais vêm dos portões.
+- **Decidido em 19/10/2026 (aguarda validação do PO):** portões mínimos. O Portão 0 exige a validação de integridade completa (RF12, CA-04, CA-07); depois dele, alterar RQ, CI/CE ou string de busca exige um desvio registrado (regra 2). Ver `plan.md`.
 
 ## 12. Rastreabilidade
 

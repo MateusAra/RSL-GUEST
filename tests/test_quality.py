@@ -2,6 +2,7 @@ from fastapi.testclient import TestClient
 import pytest
 
 from backend.api import app
+from tests.helpers import create_execution
 from rsl_foundation import calculate_weighted_kappa
 
 
@@ -39,11 +40,7 @@ def _project_and_study(client: TestClient) -> tuple[str, str, str]:
             ],
         },
     ).json()
-    execution = client.post(
-        f"/api/v1/projects/{project['id']}/search-executions",
-        headers={"Authorization": f"Bearer {admin_token}"},
-        json={"base": "scopus", "query": "XAI AND MAS", "fields": ["title"]},
-    ).json()
+    execution = create_execution(client, project['id'], {"Authorization": f"Bearer {admin_token}"})
     imported = client.post(
         f"/api/v1/search-executions/{execution['id']}/imports",
         headers={"Authorization": f"Bearer {admin_token}"},

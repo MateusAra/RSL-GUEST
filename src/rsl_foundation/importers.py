@@ -19,7 +19,34 @@ FIELD_ALIASES = {
     "doi": {"doi", "digitalobjectidentifier"},
     "abstract": {"abstract", "summary", "ab"},
     "keywords": {"keywords", "keyword", "tags", "kw"},
+    "publication_type": {"type", "documenttype", "publicationtype", "itemtype", "ty"},
 }
+
+PUBLICATION_TYPES = {
+    "journal": {"jour", "jfull", "ejour", "mgzn", "article", "journalarticle", "journal"},
+    "conference": {"conf", "cpaper", "inproceedings", "conference", "proceedings", "conferencepaper", "proceedingspaper"},
+    "preprint": {"unpb", "unpublished", "preprint"},
+    "thesis": {"thes", "phdthesis", "mastersthesis", "thesis", "dissertation"},
+    "book": {"book", "chap", "inbook", "incollection", "bookchapter", "booksection"},
+}
+
+# Canonical preference (spec 003, RF21): journal > conference > preprint; anything else ranks last.
+PUBLICATION_TYPE_RANK = {"journal": 3, "conference": 2, "preprint": 1}
+COMPLETENESS_FIELDS = ("authors", "year", "venue", "doi", "abstract", "keywords")
+
+
+def publication_type(raw_type: Any, venue: str | None, doi: str | None) -> str | None:
+    if (doi or "").startswith("10.48550/") or "arxiv" in (venue or "").casefold():
+        return "preprint"
+    normalized = re.sub(r"[^a-z]", "", str(raw_type or "").casefold())
+    for canonical, aliases in PUBLICATION_TYPES.items():
+        if normalized in aliases:
+            return canonical
+    return "other" if normalized else None
+
+
+def metadata_completeness(record: dict[str, Any]) -> int:
+    return sum(1 for field in COMPLETENESS_FIELDS if record.get(field))
 
 
 def normalize_title(title: str) -> str:
@@ -35,12 +62,12 @@ def title_similarity(first: str, second: str) -> float:
     return ratio(first_normalized, second_normalized) / 100
 
 
-def _decode(payload: bytes) -> str:
+def _decode(payload: bytes) -> tuple[str, str]:
     try:
-        return payload.decode("utf-8-sig")
+        return payload.decode("utf-8-sig"), "utf-8"
     except UnicodeDecodeError:
         try:
-            return payload.decode("latin-1")
+            return payload.decode("latin-1"), "latin-1"
         except UnicodeDecodeError as exc:
             raise ValueError("file encoding must be UTF-8 or Latin-1") from exc
 
@@ -75,15 +102,17 @@ def _canonical_record(record: dict[str, Any]) -> dict[str, Any]:
     title = str(record.get("title") or "").strip()
     doi = str(record.get("doi") or "").strip()
     doi = re.sub(r"^https?://(?:dx\.)?doi\.org/", "", doi, flags=re.IGNORECASE).casefold()
+    venue = str(record.get("venue") or "").strip() or None
     return {
         "title": title,
         "normalized_title": normalize_title(title),
         "authors": _authors(record.get("authors", record.get("author"))),
         "year": _year(record.get("year")),
-        "venue": str(record.get("venue") or "").strip() or None,
+        "venue": venue,
         "doi": doi or None,
         "abstract": str(record.get("abstract") or "").strip() or None,
         "keywords": _keywords(record.get("keywords")),
+        "publication_type": publication_type(record.get("publication_type"), venue, doi or None),
     }
 
 
@@ -109,21 +138,22 @@ def _parse_csv(text: str) -> list[dict[str, Any]]:
     return parsed
 
 
-def parse_records(payload: bytes, filename: str) -> list[dict[str, Any]]:
-    text = _decode(payload)
+def parse_records_with_report(payload: bytes, filename: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    text, encoding = _decode(payload)
     extension = filename.rsplit(".", 1)[-1].casefold() if "." in filename else ""
     if extension == "ris":
         source_records = rispy.loads(text)
         records = [
             _canonical_record(
                 {
-                    "title": item.get("title"),
+                    "title": item.get("title") or item.get("primary_title"),
                     "authors": item.get("authors"),
                     "year": item.get("year"),
                     "venue": item.get("journal_name") or item.get("secondary_title"),
                     "doi": item.get("doi"),
                     "abstract": item.get("abstract"),
                     "keywords": item.get("keywords"),
+                    "publication_type": item.get("type_of_reference"),
                 }
             )
             for item in source_records
@@ -140,6 +170,11 @@ def parse_records(payload: bytes, filename: str) -> list[dict[str, Any]]:
                     "doi": item.get("doi"),
                     "abstract": item.get("abstract"),
                     "keywords": item.get("keywords"),
+                    "publication_type": (
+                        "preprint"
+                        if str(item.get("archiveprefix", "")).casefold() == "arxiv"
+                        else item.get("ENTRYTYPE")
+                    ),
                 }
             )
             for item in source_records
@@ -149,7 +184,32 @@ def parse_records(payload: bytes, filename: str) -> list[dict[str, Any]]:
     else:
         raise ValueError("supported formats are RIS, BibTeX and CSV")
 
-    records = [record for record in records if record["title"]]
-    if not records:
+    # Spec 003 CA-04: incomplete records are reported, never dropped silently.
+    anomalies: list[dict[str, Any]] = []
+    for index, record in enumerate(records, start=1):
+        issues = [
+            issue
+            for issue, missing in (
+                ("missing_title", not record["title"]),
+                ("missing_authors", not record["authors"]),
+                ("missing_year", record["year"] is None),
+            )
+            if missing
+        ]
+        if issues:
+            anomalies.append({"record": index, "title": record["title"] or None, "issues": issues})
+    kept = [record for record in records if record["title"]]
+    if not kept:
         raise ValueError("no bibliographic records found")
-    return records
+    report = {
+        "encoding": encoding,
+        "warnings": ["file decoded as Latin-1; check accented characters"] if encoding == "latin-1" else [],
+        "source_count": len(records),
+        "skipped_count": len(records) - len(kept),
+        "anomalies": anomalies,
+    }
+    return kept, report
+
+
+def parse_records(payload: bytes, filename: str) -> list[dict[str, Any]]:
+    return parse_records_with_report(payload, filename)[0]

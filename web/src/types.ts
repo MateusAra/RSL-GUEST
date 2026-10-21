@@ -111,3 +111,31 @@ export type ImportSummary = {
   articles: number;
   files: { id: number; file_name: string; imported_count: number; created_at: string }[];
 }[];
+
+export type ArticleBrief = {
+  id: number;
+  title: string;
+  author: string;
+  year: string;
+  journal: string;
+  source: string | null;
+  finished_data_extraction: boolean;
+};
+export type QualityAssessmentData = {
+  questions: { id: number; description: string }[];
+  answers: { id: number; description: string; weight: number }[];
+  max_score: number;
+  cutoff_score: number;
+  articles: (ArticleBrief & { answers: Record<string, number>; score: number; complete: boolean; passed: boolean })[];
+};
+export type ExtractionValue = string | number | number[] | null;
+export type DataExtractionData = {
+  fields: { id: number; description: string; field_type: ExtractionField["field_type"]; lookups: { id: number; value: string }[] }[];
+  articles: (ArticleBrief & { values: Record<string, ExtractionValue> })[];
+};
+export type AnalysisData = {
+  per_source: { source: string; total: number; accepted: number }[];
+  status_totals: Record<ArticleStatus, number>;
+  final_per_year: { year: string; count: number }[];
+  final_total: number;
+};

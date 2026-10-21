@@ -7,6 +7,7 @@ const TABS = [
   { to: "", label: "Revisão", end: true },
   { to: "planejamento", label: "Planejamento" },
   { to: "conducao", label: "Condução" },
+  { to: "sintese", label: "Síntese" },
   { to: "relatorio", label: "Relatório" },
 ];
 

@@ -139,3 +139,77 @@ export type AnalysisData = {
   final_per_year: { year: string; count: number }[];
   final_total: number;
 };
+
+export type Code = {
+  id: number;
+  name: string;
+  definition: string;
+  limits: string;
+  kind: "deductive" | "emergent";
+  kind_label: string;
+  status: "draft" | "active" | "merged" | "removed";
+  status_label: string;
+  origin_field_id: number | null;
+  origin_lookup_id: number | null;
+  merged_into_id: number | null;
+  created_by_id: number | null;
+  segments: number;
+};
+export type CodeEvent = {
+  sequence: number;
+  code_id: number | null;
+  action: string;
+  previous: Record<string, unknown> | null;
+  new: Record<string, unknown> | null;
+  justification: string;
+  user: string | null;
+  created_at: string;
+};
+export type CodingSettings = {
+  dual_enabled: boolean;
+  sample_percent: number;
+  coder_a_id: number | null;
+  coder_b_id: number | null;
+  codebook_verified_by_id: number | null;
+  codebook_verified_at: string | null;
+  closed_at: string | null;
+  close_justification: string;
+  sample: { article_id: number; coder_a_done: boolean; coder_b_done: boolean }[];
+};
+export type CodingOverview = {
+  settings: CodingSettings;
+  my_slot: "a" | "b" | null;
+  articles: { id: number; title: string; author: string; year: string; segments: number; in_sample: boolean }[];
+};
+export type SegmentRow = {
+  id: number;
+  article_id: number;
+  text: string;
+  page: string;
+  created_by_id: number | null;
+  codes: { final: number[]; mine?: number[]; coder_a?: number[]; coder_b?: number[] };
+};
+export type Agreement = {
+  enabled: boolean;
+  articles_done: number;
+  segments: number;
+  agreed_segments: number;
+  alpha: number | null;
+  kappa: number | null;
+  metric: "alpha" | "kappa";
+  value: number | null;
+  threshold: number;
+  below_threshold: boolean;
+  divergences: { segment_id: number; article_id: number; text: string; page: string; coder_a: number[]; coder_b: number[]; final: number[]; resolved: boolean }[];
+};
+export type ThemeRow = {
+  id: number;
+  name: string;
+  description: string;
+  parent_id: number | null;
+  codes: (Code & { justification: string; evidence: { id: number; text: string; page: string; article_id: number; article_title: string }[] })[];
+};
+export type SynthesisChecklist = {
+  items: { item: number; text: string; met: boolean | null; justification: string }[];
+  evaluated: boolean;
+};

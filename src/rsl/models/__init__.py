@@ -8,6 +8,21 @@ from .conducting import (
     SearchSession,
     data_extraction_select_values,
 )
+from .synthesis import (
+    CHECKLIST_ITEMS,
+    CODE_KINDS,
+    CODE_STATUSES,
+    Code,
+    CodeEvent,
+    CodingSample,
+    CodingSettings,
+    Segment,
+    SegmentCode,
+    SegmentResolution,
+    SynthesisChecklistItem,
+    Theme,
+    ThemeCode,
+)
 from .reviews import (
     Activity,
     DataExtractionField,
@@ -25,6 +40,19 @@ from .reviews import (
 )
 
 __all__ = [
+    "CHECKLIST_ITEMS",
+    "CODE_KINDS",
+    "CODE_STATUSES",
+    "Code",
+    "CodeEvent",
+    "CodingSample",
+    "CodingSettings",
+    "Segment",
+    "SegmentCode",
+    "SegmentResolution",
+    "SynthesisChecklistItem",
+    "Theme",
+    "ThemeCode",
     "ARTICLE_STATUSES",
     "Activity",
     "Article",

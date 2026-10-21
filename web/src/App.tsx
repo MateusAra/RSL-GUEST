@@ -12,6 +12,7 @@ import ReviewHomePage from "./pages/review/ReviewHomePage";
 import PlanningPage from "./pages/review/PlanningPage";
 import ConductingPage from "./pages/review/ConductingPage";
 import ReportingPage from "./pages/review/ReportingPage";
+import SynthesisPage from "./pages/review/SynthesisPage";
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth();
@@ -40,6 +41,7 @@ export default function App() {
           <Route index element={<ReviewHomePage />} />
           <Route path="planejamento/*" element={<PlanningPage />} />
           <Route path="conducao/*" element={<ConductingPage />} />
+          <Route path="sintese/*" element={<SynthesisPage />} />
           <Route path="relatorio" element={<ReportingPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />

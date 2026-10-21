@@ -17,6 +17,8 @@ dependencies = [
 	"rapidfuzz>=3.9,<4.0",
 	"numpy>=1.26,<3.0",
 	"python-docx>=1.1,<2.0",
+	"scikit-learn>=1.5,<2.0",
+	"krippendorff>=0.8,<1.0",
 ]
 
 [tool.pytest.ini_options]

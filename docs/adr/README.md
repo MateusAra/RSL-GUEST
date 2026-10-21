@@ -21,5 +21,7 @@ Consequências: o que fica mais fácil e mais difícil
 | 004 | Armazenamento de objetos | aceita |
 | 005 | Biblioteca de κ e α | aceita |
 | 006 | Hospedagem | aceita |
+| 007 | Ferramenta genérica no estilo do Parsifal | aceita |
+| 008 | Busca automática pelas APIs das bases | aceita |
 
 Mudar a constituição ou a política de GenAI (spec 011) também exige ADR.

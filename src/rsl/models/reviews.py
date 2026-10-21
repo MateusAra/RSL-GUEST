@@ -30,6 +30,8 @@ class Source(Base):
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     url: Mapped[str] = mapped_column(String(200), default="", nullable=False)
     is_default: Mapped[bool] = mapped_column(default=False, nullable=False)
+    # Automated search connector (rsl.search.CONNECTORS); NULL = manual import only.
+    connector: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
 
 class Review(Base):

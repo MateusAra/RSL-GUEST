@@ -6,6 +6,7 @@ import ErrorAlert from "../../../components/ErrorAlert";
 import InlineEdit from "../../../components/InlineEdit";
 import AddInput from "../../../components/AddInput";
 import type { KeywordRow, Picoc, Planning, SourceRow } from "../../../types";
+import { useConnectors } from "../conducting/AutoSearch";
 import { usePlanningMutation } from "./usePlanning";
 import { useQuery } from "@tanstack/react-query";
 import { useReview } from "../useReview";
@@ -252,35 +253,50 @@ function SearchString({ planning }: { planning: Planning }) {
   );
 }
 
+const CUSTOM_CONNECTORS = ["openalex", "semantic_scholar"];
+
 function Sources({ planning }: { planning: Planning }) {
   const review = useReview();
-  const [custom, setCustom] = useState({ name: "", url: "" });
+  const [custom, setCustom] = useState({ name: "", url: "", connector: "" });
+  const connectors = useConnectors();
+  const connectorLabel = (key?: string | null) => connectors.data?.find((item) => item.key === key)?.label;
   const suggested = useQuery({
     queryKey: ["suggested-sources", review.id, planning.sources.length],
     queryFn: () => api.get<SourceRow[]>(`/reviews/${review.id}/sources/suggested`),
   });
-  const add = usePlanningMutation((base, payload: { source_id?: number; name?: string; url?: string }) =>
+  const add = usePlanningMutation((base, payload: { source_id?: number; name?: string; url?: string; connector?: string | null }) =>
     api.post(`${base}/sources`, payload));
+  const setConnector = usePlanningMutation((base, source: SourceRow & { connector: string | null }) =>
+    api.patch(`${base}/sources/${source.id}`, { name: source.name, url: source.url, connector: source.connector }));
   const remove = usePlanningMutation((base, id: number) => api.delete(`${base}/sources/${id}`));
 
   function submit(event: FormEvent) {
     event.preventDefault();
-    add.mutate(custom, { onSuccess: () => setCustom({ name: "", url: "" }) });
+    add.mutate({ ...custom, connector: custom.connector || null }, { onSuccess: () => setCustom({ name: "", url: "", connector: "" }) });
   }
 
   return (
     <Panel id="fontes" title="Fontes">
-      <ErrorAlert error={add.error ?? remove.error} />
+      <ErrorAlert error={add.error ?? remove.error ?? setConnector.error} />
       {planning.sources.length > 0 && (
         <Table size="sm" className="align-middle">
           <thead>
-            <tr><th>Nome</th><th>URL</th><th /></tr>
+            <tr><th>Nome</th><th>URL</th><th>Busca automática</th><th /></tr>
           </thead>
           <tbody>
             {planning.sources.map((source) => (
               <tr key={source.id}>
                 <td>{source.name}</td>
                 <td>{source.url && <a href={source.url} target="_blank" rel="noreferrer">{source.url}</a>}</td>
+                <td className="small">
+                  {source.is_default ? (connectorLabel(source.connector) ?? <span className="text-muted">só importação de arquivo</span>) : (
+                    <Form.Select size="sm" value={source.connector ?? ""} aria-label={`Busca automática de ${source.name}`}
+                      onChange={(event) => setConnector.mutate({ ...source, connector: event.target.value || null })}>
+                      <option value="">Só importação de arquivo</option>
+                      {CUSTOM_CONNECTORS.map((key) => <option key={key} value={key}>{connectorLabel(key) ?? key}</option>)}
+                    </Form.Select>
+                  )}
+                </td>
                 <td className="text-end">
                   <Button size="sm" variant="outline-danger" aria-label={`Remover ${source.name}`} onClick={() => remove.mutate(source.id)}>
                     <i className="bi bi-trash" />
@@ -308,6 +324,11 @@ function Sources({ planning }: { planning: Planning }) {
           onChange={(event) => setCustom({ ...custom, name: event.target.value })} />
         <Form.Control size="sm" placeholder="URL (opcional)" maxLength={200} value={custom.url} aria-label="URL da fonte"
           onChange={(event) => setCustom({ ...custom, url: event.target.value })} />
+        <Form.Select size="sm" value={custom.connector} aria-label="Busca automática da nova fonte" style={{ maxWidth: 220 }}
+          onChange={(event) => setCustom({ ...custom, connector: event.target.value })}>
+          <option value="">Só importação de arquivo</option>
+          {CUSTOM_CONNECTORS.map((key) => <option key={key} value={key}>Busca via {connectorLabel(key) ?? key}</option>)}
+        </Form.Select>
         <Button type="submit" size="sm" className="text-nowrap"><i className="bi bi-plus-lg me-1" />Adicionar</Button>
       </Form>
     </Panel>

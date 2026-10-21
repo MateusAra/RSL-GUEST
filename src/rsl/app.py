@@ -10,8 +10,10 @@ from fastapi.staticfiles import StaticFiles
 
 from .db import Database
 from .routers import (
-    analysis, auth, collaboration, conducting, insights, invites, planning, prisma_report, reporting, reviews, synthesis,
+    analysis, auth, collaboration, conducting, insights, invites, planning, prisma_report, reporting, reviews, searching,
+    synthesis,
 )
+from .search.runner import mark_interrupted
 from .settings import ROOT, Settings, load_settings
 
 API_PREFIX = "/api/v1"
@@ -31,6 +33,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         run_migrations(settings.database_url)
+        mark_interrupted(app.state.database)
         yield
         app.state.database.engine.dispose()
 
@@ -38,7 +41,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
     app.state.database = Database(settings.database_url)
     for module in (auth, reviews, invites, planning, conducting, analysis, insights, reporting, synthesis, collaboration,
-                   prisma_report):
+                   prisma_report, searching):
         app.include_router(module.router, prefix=API_PREFIX)
 
     index = settings.web_dist / "index.html"

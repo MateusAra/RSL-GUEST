@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Alert, Button, Form, Modal, Spinner, Table } from "react-bootstrap";
+import { Alert, Badge, Button, Form, Modal, Spinner, Table } from "react-bootstrap";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../../api";
 import Panel from "../../../components/Panel";
@@ -88,7 +88,7 @@ export default function ImportPage() {
 
   return (
     <Panel title="Importar estudos">
-      <p className="small text-muted">Envie o arquivo exportado de cada fonte em BibTeX (.bib), RIS (.ris) ou CSV.</p>
+      <p className="small text-muted">Envie o arquivo exportado de cada fonte em BibTeX (.bib), RIS (.ris) ou CSV. As buscas automáticas feitas na etapa 1 aparecem aqui marcadas como API.</p>
       <ErrorAlert error={upload.error} />
       {report && (
         <Alert variant="success" className="py-2 small" dismissible onClose={() => setReport(null)}>
@@ -108,7 +108,10 @@ export default function ImportPage() {
               <td className="text-end">{item.articles}</td>
               <td className="small">
                 {item.files.length === 0 ? <span className="text-muted">—</span> : item.files.map((file) => (
-                  <div key={file.id}>{file.file_name} <span className="text-muted">({file.imported_count})</span></div>
+                  <div key={file.id}>
+                    {file.from_api && <Badge bg="info" className="me-1">API</Badge>}
+                    {file.file_name} <span className="text-muted">({file.imported_count})</span>
+                  </div>
                 ))}
               </td>
               <td className="text-end text-nowrap">

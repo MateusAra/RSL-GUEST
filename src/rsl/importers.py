@@ -102,7 +102,7 @@ def _clean_bibtex(value: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"[{}]", "", value)).strip()
 
 
-def _finalize(record: dict[str, Any]) -> dict[str, str]:
+def finalize_record(record: dict[str, Any]) -> dict[str, str]:
     article = {field: _join(record.get(field), "; ") for field in ARTICLE_TEXT_FIELDS}
     article["year"] = _year(article["year"])
     article["doi"] = normalize_doi(article["doi"]) if article["doi"] else ""
@@ -119,7 +119,7 @@ def _from_bibtex(text: str) -> list[dict[str, str]]:
     articles = []
     for entry in entries:
         value = {key: _clean_bibtex(str(item)) for key, item in entry.items()}
-        articles.append(_finalize({
+        articles.append(finalize_record({
             "bibtex_key": value.get("ID"),
             "title": value.get("title"),
             "author": value.get("author"),
@@ -146,7 +146,7 @@ def _from_ris(text: str) -> list[dict[str, str]]:
     articles = []
     for entry in rispy.loads(text):
         pages = "-".join(part for part in (entry.get("start_page"), entry.get("end_page")) if part)
-        articles.append(_finalize({
+        articles.append(finalize_record({
             "bibtex_key": entry.get("id"),
             "title": entry.get("title") or entry.get("primary_title"),
             "author": _join(entry.get("authors") or entry.get("first_authors"), " and "),
@@ -175,7 +175,7 @@ def _from_csv(text: str) -> list[dict[str, str]]:
         for field, aliases in CSV_ALIASES.items()
     }
     return [
-        _finalize({field: row.get(column) if column else "" for field, column in mapping.items()})
+        finalize_record({field: row.get(column) if column else "" for field, column in mapping.items()})
         for row in reader
     ]
 

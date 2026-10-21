@@ -29,9 +29,12 @@ from ..models import (
     ReportSettings,
     ReportVersion,
     Review,
+    SearchResult,
+    SearchRun,
     SearchSession,
     SelectionCriteria,
 )
+from ..search import CONNECTORS
 from ..prisma import PRISMA_ATTRIBUTION, PRISMA_ITEMS, PRISMA_KEYS, PRISMA_STATUSES
 from .analysis import _questions, extraction_rows, final_articles, quality_scores
 from .insights import Filters, compute
@@ -277,11 +280,32 @@ def report_data(db: DbSession, review: Review) -> dict[str, Any]:
     return {
         "review": review, "articles": articles, "keys": keys, "scores": scores, "style": style, "planning": planning,
         "source_strings": [(source.name, strings.get(source.id, "")) for source in review.sources],
-        "base_string": strings.get(None, ""), "themes": themes, "codes": [code for code in list_codes(review, db) if code["status"] == "active"],
+        "base_string": strings.get(None, ""), "search_log": search_log(db, review, strings), "themes": themes, "codes": [code for code in list_codes(review, db) if code["status"] == "active"],
         "extraction": (header, rows), "hypotheses": insights["hypotheses"], "agreement": agreement,
         "flow": prisma_flow(db, review), "sections": _sections(db, review), "checklist": _checklist(db, review),
         "references": [(keys[article.id], format_reference(article, style)) for article in sorted(articles, key=lambda a: (a.author.casefold(), a.year))],
     }
+
+
+def search_log(db: DbSession, review: Review, strings: dict[int | None, str]) -> list[dict[str, Any]]:
+    """Every search that brought studies in: API runs (exact string, filters, totals) and imported files."""
+    runs = db.scalars(select(SearchRun).where(SearchRun.review_id == review.id, SearchRun.mode == "import",
+                                              SearchRun.status == "done")).all()
+    from_api = {run.search_result_id for run in runs}
+    files = db.scalars(select(SearchResult).where(SearchResult.review_id == review.id)).all()
+    log = [
+        {"source": run.source.name, "date": run.created_at, "method": f"API ({CONNECTORS[run.connector].label})",
+         "query": run.query, "connector": run.connector,
+         "filters": f"{run.year_from or '…'}–{run.year_to or '…'}" if run.year_from or run.year_to else "—",
+         "reported": "—" if run.total_reported is None else str(run.total_reported), "imported": run.imported}
+        for run in runs
+    ] + [
+        {"source": next((source.name for source in review.sources if source.id == item.source_id), "—"),
+         "date": item.created_at, "method": f"Arquivo importado ({item.file_name})", "query": strings.get(item.source_id, ""),
+         "connector": None, "filters": "—", "reported": "—", "imported": item.imported_count}
+        for item in files if item.id not in from_api
+    ]
+    return sorted(log, key=lambda entry: entry["date"])
 
 
 def methods_blocks(data: dict[str, Any]) -> list[tuple[str, list[str] | list[list[str]], str]]:
@@ -296,11 +320,18 @@ def methods_blocks(data: dict[str, Any]) -> list[tuple[str, list[str] | list[lis
         ("Critérios de inclusão", [item["description"] for item in planning["inclusion_criteria"]], "list"),
         ("Critérios de exclusão", [item["description"] for item in planning["exclusion_criteria"]], "list"),
         ("Fontes e strings de busca", [[name, string or data["base_string"] or "—"] for name, string in data["source_strings"]], "table"),
+        ("Estratégia de busca executada",
+         [["Fonte", "Data", "Forma", "String enviada", "Anos", "Na base", "Importados"]]
+         + [[entry["source"], entry["date"].strftime("%d/%m/%Y"), entry["method"], entry["query"] or "—", entry["filters"],
+             entry["reported"], str(entry["imported"])] for entry in data["search_log"]]
+         if data["search_log"] else ["Nenhuma busca registrada."], "header_table" if data["search_log"] else "text"),
         ("Avaliação de qualidade", [f"Q{index}: {item['description']}" for index, item in enumerate(planning["quality_questions"], 1)]
          + [f"Respostas: {', '.join(f'{a['description']} ({a['weight']:g})' for a in planning['quality_answers'])}" if planning["quality_answers"] else "Sem respostas cadastradas.",
             f"Pontuação máxima {planning['quality_max_score']:g}; nota de corte {planning['quality_cutoff_score']:g}."], "list"),
         ("Formulário de extração", [[field["description"], field["field_type_label"]] for field in planning["data_extraction_fields"]], "table"),
     ]
+    if any(entry["connector"] == "acm_openalex" for entry in data["search_log"]):
+        blocks.append(("Observação sobre a ACM Digital Library", [CONNECTORS["acm_openalex"].notice], "text"))
     agreement = data["agreement"]
     coding = [f"{len(data['codes'])} código(s) ativo(s) e {len(data['themes'])} tema(s)."]
     if agreement["enabled"]:

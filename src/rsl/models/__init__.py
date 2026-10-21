@@ -16,6 +16,7 @@ from .collaboration import (
     QuestionField,
     QuestionTheme,
 )
+from .search import RUN_MODES, RUN_STATUSES, SearchRun, UserApiKey
 from .report import (
     REFERENCE_STYLES,
     REPORT_SECTIONS,
@@ -58,6 +59,10 @@ from .reviews import (
 )
 
 __all__ = [
+    "RUN_MODES",
+    "RUN_STATUSES",
+    "SearchRun",
+    "UserApiKey",
     "REFERENCE_STYLES",
     "REPORT_SECTIONS",
     "REQUIRED_SECTIONS",

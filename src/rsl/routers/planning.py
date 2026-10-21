@@ -21,6 +21,7 @@ from ..models import (
     SelectionCriteria,
     Source,
 )
+from ..search import CUSTOM_CONNECTORS
 
 router = APIRouter(tags=["planejamento"])
 
@@ -126,7 +127,7 @@ def planning_out(db: DbSession, review: Review) -> dict[str, Any]:
         ],
         "keywords": [_keyword_out(item, synonyms.get(item.id, [])) for item in keywords if item.synonym_of_id is None],
         "search_string": "" if base_string is None else base_string.search_string,
-        "sources": [{"id": source.id, "name": source.name, "url": source.url} for source in review.sources],
+        "sources": [source_out(source) for source in review.sources],
         "inclusion_criteria": [{"id": item.id, "description": item.description} for item in criteria if item.criteria_type == "I"],
         "exclusion_criteria": [{"id": item.id, "description": item.description} for item in criteria if item.criteria_type == "E"],
         "quality_questions": [
@@ -369,13 +370,25 @@ class SourceIn(BaseModel):
     source_id: int | None = None
     name: str = Field(default="", max_length=100)
     url: str = Field(default="", max_length=200)
+    connector: str | None = None
+
+
+def source_out(source: Source) -> dict[str, Any]:
+    return {"id": source.id, "name": source.name, "url": source.url, "is_default": source.is_default,
+            "connector": source.connector}
+
+
+def _custom_connector(value: str | None) -> str | None:
+    if value and value not in CUSTOM_CONNECTORS:
+        raise HTTPException(status_code=422, detail="Fontes próprias só podem usar a busca automática do OpenAlex ou do Semantic Scholar.")
+    return value or None
 
 
 @router.get("/reviews/{review_id}/sources/suggested")
 def suggested_sources(review: MemberReview, db: DbSession) -> list[dict[str, Any]]:
     current = {source.id for source in review.sources}
     return [
-        {"id": source.id, "name": source.name, "url": source.url}
+        source_out(source)
         for source in db.scalars(select(Source).where(Source.is_default.is_(True)).order_by(Source.name))
         if source.id not in current
     ]
@@ -388,7 +401,8 @@ def add_source(payload: SourceIn, review: MemberReview, db: DbSession, user: Cur
         if source is None or not source.is_default:
             raise HTTPException(status_code=404, detail="Biblioteca não encontrada.")
     else:
-        source = Source(name=_clean(payload.name, "o nome da fonte"), url=payload.url.strip(), is_default=False)
+        source = Source(name=_clean(payload.name, "o nome da fonte"), url=payload.url.strip(), is_default=False,
+                        connector=_custom_connector(payload.connector))
         db.add(source)
         db.flush()
     if any(item.id == source.id for item in review.sources):
@@ -396,7 +410,7 @@ def add_source(payload: SourceIn, review: MemberReview, db: DbSession, user: Cur
     review.sources.append(source)
     log_activity(db, user, "adicionou a fonte", review, source.name)
     db.commit()
-    return {"id": source.id, "name": source.name, "url": source.url}
+    return source_out(source)
 
 
 @router.patch("/reviews/{review_id}/sources/{source_id}")
@@ -407,8 +421,9 @@ def edit_source(source_id: int, payload: SourceIn, review: MemberReview, db: DbS
     if source.is_default:
         raise HTTPException(status_code=422, detail="As bibliotecas sugeridas não podem ser editadas.")
     source.name, source.url = _clean(payload.name, "o nome da fonte"), payload.url.strip()
+    source.connector = _custom_connector(payload.connector)
     db.commit()
-    return {"id": source.id, "name": source.name, "url": source.url}
+    return source_out(source)
 
 
 @router.delete("/reviews/{review_id}/sources/{source_id}", status_code=204)

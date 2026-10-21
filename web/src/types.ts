@@ -35,7 +35,7 @@ export type Activity = { user: UserPublic; verb: string; target: string; created
 
 export type Picoc = { population: string; intervention: string; comparison: string; outcome: string; context: string };
 export type KeywordRow = { id: number; description: string; related_to: "" | "P" | "I" | "C" | "O"; synonyms: { id: number; description: string }[] };
-export type SourceRow = { id: number; name: string; url: string };
+export type SourceRow = { id: number; name: string; url: string; is_default?: boolean; connector?: string | null };
 export type DescriptionRow = { id: number; description: string };
 export type ExtractionField = {
   id: number;
@@ -109,8 +109,54 @@ export type SearchInfo = {
 export type ImportSummary = {
   source: { id: number; name: string };
   articles: number;
-  files: { id: number; file_name: string; imported_count: number; created_at: string }[];
+  files: { id: number; file_name: string; imported_count: number; created_at: string; from_api: boolean }[];
 }[];
+
+export type ConnectorInfo = {
+  key: string;
+  label: string;
+  provider: string | null;
+  key_required: boolean;
+  max_records: number;
+  syntax_help: string;
+  notice: string;
+};
+export type ApiKeyInfo = {
+  provider: string;
+  label: string;
+  url: string;
+  required: boolean;
+  extra_label: string | null;
+  configured: boolean;
+  last_four: string;
+  has_extra: boolean;
+  updated_at: string | null;
+  connectors: string[];
+};
+export type SearchRun = {
+  id: number;
+  source: { id: number; name: string };
+  connector: string;
+  connector_label: string;
+  query: string;
+  year_from: number | null;
+  year_to: number | null;
+  max_records: number;
+  mode: "preview" | "import";
+  status: "queued" | "running" | "done" | "failed";
+  status_label: string;
+  total_reported: number | null;
+  retrieved: number;
+  imported: number;
+  skipped_existing: number;
+  warnings: string[];
+  preview: { title: string; author: string; year: string; journal: string; doi: string; url: string }[] | null;
+  error: string;
+  search_result_id: number | null;
+  user_id: number | null;
+  created_at: string;
+  finished_at: string | null;
+};
 
 export type ArticleBrief = {
   id: number;

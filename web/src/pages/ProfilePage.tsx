@@ -6,6 +6,7 @@ import { useAuth } from "../auth";
 import Panel from "../components/Panel";
 import ErrorAlert from "../components/ErrorAlert";
 import type { Me } from "../types";
+import ApiKeysPanel from "./ApiKeysPanel";
 
 export default function ProfilePage() {
   const { user, setUser } = useAuth();
@@ -87,6 +88,9 @@ export default function ProfilePage() {
               <Button type="submit" disabled={savePassword.isPending}>Alterar senha</Button>
             </Form>
           </Panel>
+        </Col>
+        <Col xs={12}>
+          <ApiKeysPanel />
         </Col>
       </Row>
     </Container>

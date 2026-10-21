@@ -7,6 +7,7 @@ import ErrorAlert from "../../../components/ErrorAlert";
 import BlockedNotice from "../../../components/BlockedNotice";
 import type { SearchInfo } from "../../../types";
 import { useReview } from "../useReview";
+import AutoSearch from "./AutoSearch";
 
 function SourceString({ reviewId, sourceId, initial, base }: { reviewId: number; sourceId: number; initial: string; base: string }) {
   const queryClient = useQueryClient();
@@ -74,12 +75,16 @@ export default function SearchPage() {
             <Tab.Pane key={item.source.id} eventKey={String(item.source.id)}>
               {item.source.url && (
                 <p className="small">
-                  Execute a busca em <a href={item.source.url} target="_blank" rel="noreferrer">{item.source.url}</a> e
-                  importe o resultado na etapa 2.
+                  {item.source.connector ? "Busque pela API abaixo ou, se preferir, execute a busca em " : "Execute a busca em "}
+                  <a href={item.source.url} target="_blank" rel="noreferrer">{item.source.url}</a> e importe o arquivo na etapa 2.
                 </p>
               )}
               <SourceString reviewId={review.id} sourceId={item.source.id} initial={item.search_string}
                 base={search.data.base_string} />
+              {item.source.connector && (
+                <AutoSearch reviewId={review.id} sourceId={item.source.id} connectorKey={item.source.connector}
+                  hasString={Boolean(item.search_string)} />
+              )}
             </Tab.Pane>
           ))}
         </Tab.Content>

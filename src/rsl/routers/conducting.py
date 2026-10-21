@@ -3,7 +3,6 @@ from __future__ import annotations
 import csv
 import io
 import re
-import secrets
 from typing import Any, Literal
 
 from fastapi import APIRouter, File, HTTPException, Query, Response, UploadFile
@@ -14,7 +13,8 @@ from sqlalchemy import asc, delete, desc, func, or_, select
 
 from ..deps import AppSettings, CurrentUser, DbSession, MemberReview, log_activity
 from ..importers import ARTICLE_TEXT_FIELDS, normalize_doi, normalize_title, parse_bibliography
-from ..models import ARTICLE_STATUSES, Article, ArticleAssignment, Review, SearchResult, SearchSession, SelectionCriteria, Source
+from ..storage import store_import
+from ..models import ARTICLE_STATUSES, Article, ArticleAssignment, Review, SearchResult, SearchRun, SearchSession, SelectionCriteria, Source
 
 router = APIRouter(tags=["condução"])
 
@@ -71,7 +71,7 @@ def get_search(review: MemberReview, db: DbSession) -> dict[str, Any]:
         "base_string": "" if base is None else base.search_string,
         "sources": [
             {
-                "source": {"id": source.id, "name": source.name, "url": source.url},
+                "source": {"id": source.id, "name": source.name, "url": source.url, "connector": source.connector},
                 "search_string": "" if (session := _session(db, review, source.id)) is None else session.search_string,
                 "version": 0 if session is None else session.version,
             }
@@ -107,13 +107,15 @@ def import_summary(review: MemberReview, db: DbSession) -> list[dict[str, Any]]:
     files = db.scalars(
         select(SearchResult).where(SearchResult.review_id == review.id).order_by(SearchResult.created_at.desc())
     ).all()
+    from_api = set(db.scalars(select(SearchRun.search_result_id).where(
+        SearchRun.review_id == review.id, SearchRun.search_result_id.is_not(None))))
     return [
         {
             "source": {"id": source.id, "name": source.name},
             "articles": counts.get(source.id, 0),
             "files": [
                 {"id": item.id, "file_name": item.file_name, "imported_count": item.imported_count,
-                 "created_at": item.created_at.isoformat()}
+                 "created_at": item.created_at.isoformat(), "from_api": item.id in from_api}
                 for item in files if item.source_id == source.id
             ],
         }
@@ -134,18 +136,7 @@ async def import_articles(source_id: int, review: MemberReview, db: DbSession, u
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    object_key = f"reviews/{review.id}/{secrets.token_hex(8)}-{file_name}"
-    target = settings.storage_path / object_key
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_bytes(content)
-
-    result = SearchResult(review_id=review.id, source_id=source.id, file_name=file_name, object_key=object_key,
-                          imported_count=len(records), created_by_id=user.id)
-    db.add(result)
-    db.flush()
-    for record in records:
-        db.add(Article(review_id=review.id, source_id=source.id, search_result_id=result.id,
-                       created_by_id=user.id, updated_by_id=user.id, **record))
+    store_import(db, settings, review, source, user, records, file_name, content)
     log_activity(db, user, f"importou {len(records)} estudo(s) de", review, source.name)
     db.commit()
     return {"source": {"id": source.id, "name": source.name}, "file_name": file_name, **report}

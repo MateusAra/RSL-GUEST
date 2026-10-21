@@ -1,6 +1,7 @@
 import { Container, Nav, Navbar, NavDropdown } from "react-bootstrap";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth";
+import NotificationBell from "./NotificationBell";
 
 export default function AppNavbar() {
   const { user, logout } = useAuth();
@@ -16,7 +17,8 @@ export default function AppNavbar() {
         <Navbar.Toggle aria-controls="main-nav" />
         <Navbar.Collapse id="main-nav">
           {user ? (
-            <Nav className="ms-auto">
+            <Nav className="ms-auto align-items-md-center">
+              <NotificationBell />
               <Nav.Link as={Link} to="/">Minhas revisões</Nav.Link>
               <NavDropdown title={user.full_name} align="end">
                 <NavDropdown.Item as={Link} to="/perfil">Perfil e senha</NavDropdown.Item>

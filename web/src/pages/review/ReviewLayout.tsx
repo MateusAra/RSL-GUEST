@@ -5,6 +5,7 @@ import { useReviewQuery } from "./useReview";
 
 const TABS = [
   { to: "", label: "Revisão", end: true },
+  { to: "painel", label: "Painel" },
   { to: "planejamento", label: "Planejamento" },
   { to: "conducao", label: "Condução" },
   { to: "sintese", label: "Síntese" },

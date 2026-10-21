@@ -13,6 +13,7 @@ import PlanningPage from "./pages/review/PlanningPage";
 import ConductingPage from "./pages/review/ConductingPage";
 import ReportingPage from "./pages/review/ReportingPage";
 import SynthesisPage from "./pages/review/SynthesisPage";
+import TeamPage from "./pages/review/TeamPage";
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth();
@@ -39,6 +40,7 @@ export default function App() {
         <Route path="/perfil" element={<RequireAuth><ProfilePage /></RequireAuth>} />
         <Route path="/revisoes/:reviewId" element={<RequireAuth><ReviewLayout /></RequireAuth>}>
           <Route index element={<ReviewHomePage />} />
+          <Route path="painel/*" element={<TeamPage />} />
           <Route path="planejamento/*" element={<PlanningPage />} />
           <Route path="conducao/*" element={<ConductingPage />} />
           <Route path="sintese/*" element={<SynthesisPage />} />

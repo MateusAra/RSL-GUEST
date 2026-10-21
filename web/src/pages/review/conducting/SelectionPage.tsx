@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Badge, Button, ButtonGroup, Dropdown, Form, InputGroup, Nav, Pagination, Spinner, Table, ToggleButton } from "react-bootstrap";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../../api";
@@ -37,20 +38,32 @@ export default function SelectionPage() {
   const [bulk, setBulk] = useState<keyof typeof BULK_ACTIONS>("accept");
   const [detail, setDetail] = useState<number | null>(null);
   const [showDuplicates, setShowDuplicates] = useState(false);
+  const [mine, setMine] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // Notifications link to ?artigo=<id> to open the study directly.
+  useEffect(() => {
+    const requested = Number(searchParams.get("artigo"));
+    if (requested) {
+      setDetail(requested);
+      setSearchParams({}, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   useEffect(() => {
     const timer = setTimeout(() => { setQ(search); setPage(1); }, 300);
     return () => clearTimeout(timer);
   }, [search]);
-  useEffect(() => setSelected(new Set()), [source, status, q, page]);
+  useEffect(() => setSelected(new Set()), [source, status, q, page, mine]);
 
   const params = useMemo(() => {
     const query = new URLSearchParams({ sort, order, page: String(page), page_size: "25" });
     if (source !== null) query.set("source_id", String(source));
     if (status) query.set("status", status);
     if (q) query.set("q", q);
+    if (mine) query.set("assigned_to_me", "true");
     return query.toString();
-  }, [source, status, q, sort, order, page]);
+  }, [source, status, q, sort, order, page, mine]);
 
   const articles = useQuery({
     queryKey: ["articles", review.id, params],
@@ -143,6 +156,8 @@ export default function SelectionPage() {
             </ToggleButton>
           ))}
         </ButtonGroup>
+        <Form.Check type="switch" id="assigned-to-me" className="small ms-2" label="Atribuídos a mim"
+          checked={mine} onChange={(event) => { setMine(event.target.checked); setPage(1); }} />
         <InputGroup size="sm" className="ms-auto" style={{ maxWidth: 280 }}>
           <InputGroup.Text><i className="bi bi-search" /></InputGroup.Text>
           <Form.Control placeholder="Buscar título, autor, resumo" aria-label="Buscar estudos" value={search}
@@ -208,7 +223,7 @@ export default function SelectionPage() {
       )}
 
       {detail !== null && data && (
-        <ArticleModal articleId={detail} ids={data.ids} planning={planning.data}
+        <ArticleModal articleId={detail} ids={data.ids.includes(detail) ? data.ids : [detail]} planning={planning.data}
           onNavigate={setDetail} onHide={() => setDetail(null)} />
       )}
       {showDuplicates && <DuplicatesModal onHide={() => setShowDuplicates(false)} />}

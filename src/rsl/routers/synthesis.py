@@ -35,6 +35,7 @@ from ..models import (
     ThemeCode,
     User,
 )
+from ..notify import notify
 from .analysis import final_articles
 
 router = APIRouter(tags=["síntese"])
@@ -396,6 +397,10 @@ def save_settings(payload: SettingsIn, review: OwnerReview, db: DbSession, user:
         size = max(1, math.ceil(len(candidates) * payload.sample_percent / 100)) if candidates else 0
         for article_id in random.SystemRandom().sample(candidates, size):
             db.add(CodingSample(review_id=review.id, article_id=article_id))
+    if payload.dual_enabled:
+        notify(db, [payload.coder_a_id, payload.coder_b_id], "dual_coding",
+               f"Você é codificador da amostra de dupla codificação em '{review.title}'", review,
+               f"/revisoes/{review.id}/sintese/codificacao", exclude=user.id)
     log_activity(db, user, "configurou a codificação de", review)
     db.commit()
     return _settings_out(db, review, settings)

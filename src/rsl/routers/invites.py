@@ -9,6 +9,7 @@ from sqlalchemy import select
 from ..db import utcnow
 from ..deps import CurrentUser, DbSession, OwnerReview, log_activity
 from ..models import Invite, User
+from ..notify import notify
 from ..schemas import InviteCreate
 from ..serializers import invite_out, review_summary
 from .auth import normalize_email
@@ -39,6 +40,8 @@ def create_invite(payload: InviteCreate, review: OwnerReview, db: DbSession, use
         code=str(uuid.uuid4()),
     )
     db.add(invite)
+    if invitee is not None:
+        notify(db, [invitee.id], "invite", f"{user.full_name} convidou você para a revisão '{review.title}'", None, "/")
     log_activity(db, user, "convidou", review, email)
     db.commit()
     db.refresh(invite)

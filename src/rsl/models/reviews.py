@@ -84,6 +84,7 @@ class Question(Base):
     question: Mapped[str] = mapped_column(String(500), nullable=False)
     parent_id: Mapped[int | None] = mapped_column(ForeignKey("questions.id", ondelete="CASCADE"), nullable=True)
     order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    conclusion: Mapped[str] = mapped_column(Text, default="", nullable=False)
 
 
 class SelectionCriteria(Base):

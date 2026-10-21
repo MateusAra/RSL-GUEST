@@ -14,7 +14,7 @@ from sqlalchemy import asc, delete, desc, func, or_, select
 
 from ..deps import AppSettings, CurrentUser, DbSession, MemberReview, log_activity
 from ..importers import ARTICLE_TEXT_FIELDS, normalize_doi, normalize_title, parse_bibliography
-from ..models import ARTICLE_STATUSES, Article, Review, SearchResult, SearchSession, SelectionCriteria, Source
+from ..models import ARTICLE_STATUSES, Article, ArticleAssignment, Review, SearchResult, SearchSession, SelectionCriteria, Source
 
 router = APIRouter(tags=["condução"])
 
@@ -182,8 +182,12 @@ def new_article(payload: ArticleIn, review: MemberReview, db: DbSession, user: C
 
 # ---- 3. study selection ---------------------------------------------------------
 
-def _filtered(review: Review, source_id: int | None, status: str | None, q: str | None):
+def _filtered(review: Review, source_id: int | None, status: str | None, q: str | None,
+              assigned_to: int | None = None):
     query = select(Article).where(Article.review_id == review.id)
+    if assigned_to is not None:
+        query = query.where(Article.id.in_(select(ArticleAssignment.article_id).where(
+            ArticleAssignment.stage == "selection", ArticleAssignment.user_id == assigned_to)))
     if source_id is not None:
         query = query.where(Article.source_id == source_id)
     if status:
@@ -199,6 +203,7 @@ def _filtered(review: Review, source_id: int | None, status: str | None, q: str 
 def list_articles(
     review: MemberReview,
     db: DbSession,
+    user: CurrentUser,
     source_id: int | None = None,
     status: Literal["U", "A", "R", "D"] | None = None,
     q: str | None = None,
@@ -206,13 +211,15 @@ def list_articles(
     order: Literal["asc", "desc"] = "asc",
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=25, ge=1, le=500),
+    assigned_to_me: bool = False,
 ) -> dict[str, Any]:
     direction = asc if order == "asc" else desc
-    query = _filtered(review, source_id, status, q).order_by(direction(SORTABLE[sort]), Article.id)
+    assigned_to = user.id if assigned_to_me else None
+    query = _filtered(review, source_id, status, q, assigned_to).order_by(direction(SORTABLE[sort]), Article.id)
     # Every id in the current filter and order, so the details modal can step through all of them.
     ids = list(db.scalars(query.with_only_columns(Article.id)))
     items = db.scalars(query.offset((page - 1) * page_size).limit(page_size)).all()
-    unfiltered = _filtered(review, source_id, None, q).subquery()
+    unfiltered = _filtered(review, source_id, None, q, assigned_to).subquery()
     status_counts = dict(
         db.execute(select(unfiltered.c.status, func.count()).group_by(unfiltered.c.status)).all()
     )

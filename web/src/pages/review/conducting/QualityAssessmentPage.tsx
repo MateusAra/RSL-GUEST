@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Accordion, Badge, Form, Spinner, Table } from "react-bootstrap";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../../api";
@@ -6,9 +7,12 @@ import ErrorAlert from "../../../components/ErrorAlert";
 import BlockedNotice from "../../../components/BlockedNotice";
 import type { QualityAssessmentData } from "../../../types";
 import { useReview } from "../useReview";
+import { useMyAssignments } from "../team/useAssignments";
 
 export default function QualityAssessmentPage() {
   const review = useReview();
+  const mine = useMyAssignments("quality");
+  const [onlyMine, setOnlyMine] = useState(false);
   const queryClient = useQueryClient();
   const key = ["quality-assessment", review.id];
   const data = useQuery({ queryKey: key, queryFn: () => api.get<QualityAssessmentData>(`/reviews/${review.id}/quality-assessment`) });
@@ -35,13 +39,15 @@ export default function QualityAssessmentPage() {
   }
 
   const assessed = articles.filter((article) => article.complete).length;
+  const visible = onlyMine && mine ? articles.filter((article) => mine.has(article.id)) : articles;
 
   return (
     <Panel title="Avaliação de qualidade"
-      actions={<span className="small text-muted">{assessed} de {articles.length} avaliados · corte {data.data.cutoff_score} de {data.data.max_score}</span>}>
+      actions={<span className="small text-muted"><Form.Check type="switch" id="only-mine" className="small d-inline-block me-3" label="Atribuídos a mim"
+          checked={onlyMine} onChange={(event) => setOnlyMine(event.target.checked)} />{assessed} de {articles.length} avaliados · corte {data.data.cutoff_score} de {data.data.max_score}</span>}>
       <ErrorAlert error={save.error} />
       <Accordion alwaysOpen>
-        {articles.map((article) => (
+        {visible.map((article) => (
           <Accordion.Item key={article.id} eventKey={String(article.id)}>
             <Accordion.Header>
               <div className="d-flex w-100 justify-content-between align-items-center pe-3 gap-2">

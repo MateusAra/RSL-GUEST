@@ -279,3 +279,25 @@ export type Snapshot = {
   corpus: number;
   results?: Insights;
 };
+
+export type Stage = "selection" | "quality" | "extraction" | "coding";
+export type Assignments = { stage: Stage; assignments: Record<string, { user_id: number; user: UserPublic | null }> };
+export type CommentRow = { id: number; user: UserPublic | null; body: string; is_resolution: boolean; resolution_status: string | null; created_at: string };
+export type NotificationRow = { id: number; kind: string; message: string; link: string; review_id: number | null; read: boolean; created_at: string };
+export type Dashboard = {
+  selection: Record<ArticleStatus, number>;
+  quality: { accepted: number; complete: number; incomplete: number };
+  extraction: { final: number; finished: number };
+  coding: { studies_coded: number; final: number; segments: number; agreement: number | null; agreement_metric: string; agreement_threshold: number };
+  members: { user: UserPublic; stages: Partial<Record<Stage, { assigned: number; pending: number }>> }[];
+};
+export type EvidenceChain = {
+  question_id: number;
+  question: string;
+  conclusion: string;
+  field_ids: number[];
+  theme_ids: number[];
+  themes: string[];
+  studies: { article_id: number; title: string; fields: { field: string; value: string }[]; segments: { segment_id: number; text: string; page: string; code: string; theme: string }[] }[];
+  gaps: string[];
+}[];

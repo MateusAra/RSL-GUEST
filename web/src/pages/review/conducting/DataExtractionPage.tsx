@@ -9,6 +9,7 @@ import type { DataExtractionData, ExtractionValue, Hypothesis, Verdicts } from "
 import { useReview } from "../useReview";
 import { downloadFile } from "./download";
 import VerdictEditor from "./VerdictEditor";
+import { useMyAssignments } from "../team/useAssignments";
 
 type Field = DataExtractionData["fields"][number];
 
@@ -61,6 +62,8 @@ function FieldInput({ field, value, onSave }: { field: Field; value: ExtractionV
 
 export default function DataExtractionPage() {
   const review = useReview();
+  const mine = useMyAssignments("extraction");
+  const [onlyMine, setOnlyMine] = useState(false);
   const queryClient = useQueryClient();
   const key = ["data-extraction", review.id];
   const data = useQuery({ queryKey: key, queryFn: () => api.get<DataExtractionData>(`/reviews/${review.id}/data-extraction`) });
@@ -105,9 +108,10 @@ export default function DataExtractionPage() {
           to={`/revisoes/${review.id}/conducao/qualidade`} linkLabel="Ir para a avaliação" />
       ) : (
         <>
-          <p className="small text-muted">{done} de {data.data.articles.length} estudos com extração concluída.</p>
+          <p className="small text-muted"><Form.Check type="switch" id="only-mine" className="small d-inline-block me-3" label="Atribuídos a mim"
+          checked={onlyMine} onChange={(event) => setOnlyMine(event.target.checked)} />{done} de {data.data.articles.length} estudos com extração concluída.</p>
           <Accordion alwaysOpen>
-            {data.data.articles.map((article) => (
+            {data.data.articles.filter((article) => !onlyMine || !mine || mine.has(article.id)).map((article) => (
               <Accordion.Item key={article.id} eventKey={String(article.id)}>
                 <Accordion.Header>
                   <div className="d-flex w-100 justify-content-between align-items-center pe-3 gap-2">

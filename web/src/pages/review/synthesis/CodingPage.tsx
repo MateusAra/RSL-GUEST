@@ -8,6 +8,7 @@ import BlockedNotice from "../../../components/BlockedNotice";
 import type { Code, SegmentRow } from "../../../types";
 import { useReview } from "../useReview";
 import { codeNames, useCodes, useCoding, useSynthesisMutation } from "./useSynthesis";
+import { useMyAssignments } from "../team/useAssignments";
 
 function CodePicker({ codes, value, onChange }: { codes: Code[]; value: number[]; onChange: (ids: number[]) => void }) {
   const chosen = new Set(value);
@@ -78,6 +79,8 @@ function SegmentCard({ segment, activeCodes, names, inSample, locked }: {
 
 export default function CodingPage() {
   const review = useReview();
+  const mine = useMyAssignments("coding");
+  const [onlyMine, setOnlyMine] = useState(false);
   const coding = useCoding();
   const codes = useCodes();
   const [articleId, setArticleId] = useState<number | null>(null);
@@ -120,7 +123,9 @@ export default function CodingPage() {
     <Row className="g-3">
       <Col lg={4}>
         <ListGroup>
-          {coding.data.articles.map((item) => (
+          <Form.Check type="switch" id="only-mine" className="small mb-2" label="Atribuídos a mim"
+          checked={onlyMine} onChange={(event) => setOnlyMine(event.target.checked)} />
+          {coding.data.articles.filter((item) => !onlyMine || !mine || mine.has(item.id)).map((item) => (
             <ListGroup.Item key={item.id} action active={item.id === current} onClick={() => setArticleId(item.id)} className="small">
               <div className="fw-semibold">{item.title}</div>
               <div className={item.id === current ? "" : "text-muted"}>

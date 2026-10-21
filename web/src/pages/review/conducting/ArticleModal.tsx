@@ -6,6 +6,8 @@ import ErrorAlert from "../../../components/ErrorAlert";
 import StatusBadge, { STATUS_LABELS } from "../../../components/StatusBadge";
 import type { Article, ArticleStatus, Planning } from "../../../types";
 import { useReview } from "../useReview";
+import AssigneeSelect from "./AssigneeSelect";
+import Discussion from "./Discussion";
 
 const EDITABLE: { key: keyof Article; label: string; rows?: number }[] = [
   { key: "title", label: "Título" },
@@ -87,9 +89,11 @@ export default function ArticleModal({ articleId, ids, planning, onNavigate, onH
             <Nav variant="tabs" className="mb-3">
               <Nav.Item><Nav.Link eventKey="details">Detalhes</Nav.Link></Nav.Item>
               <Nav.Item><Nav.Link eventKey="comments">Comentários</Nav.Link></Nav.Item>
+              <Nav.Item><Nav.Link eventKey="discussion">Discussão</Nav.Link></Nav.Item>
             </Nav>
             <Tab.Content>
               <Tab.Pane eventKey="details">
+                <div className="mb-3" style={{ maxWidth: 420 }}><AssigneeSelect articleId={articleId} stage="selection" /></div>
                 <div className="mb-3 small text-muted">
                   {article.data.source?.name} · {article.data.document_type || "tipo não informado"} · <StatusBadge status={article.data.status} />
                 </div>
@@ -105,6 +109,9 @@ export default function ArticleModal({ articleId, ids, planning, onNavigate, onH
                     )}
                   </Form.Group>
                 ))}
+              </Tab.Pane>
+              <Tab.Pane eventKey="discussion">
+                <Discussion articleId={articleId} />
               </Tab.Pane>
               <Tab.Pane eventKey="comments">
                 <Form.Control as="textarea" rows={8} maxLength={2000} value={form.comments ?? ""} aria-label="Comentários"

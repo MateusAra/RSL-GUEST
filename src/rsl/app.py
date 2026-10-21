@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .db import Database
-from .routers import analysis, auth, conducting, invites, planning, reviews
+from .routers import analysis, auth, conducting, invites, planning, reporting, reviews
 from .settings import ROOT, Settings, load_settings
 
 API_PREFIX = "/api/v1"
@@ -35,7 +35,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="RSL API", version="1.0.0", lifespan=lifespan)
     app.state.settings = settings
     app.state.database = Database(settings.database_url)
-    for module in (auth, reviews, invites, planning, conducting, analysis):
+    for module in (auth, reviews, invites, planning, conducting, analysis, reporting):
         app.include_router(module.router, prefix=API_PREFIX)
 
     index = settings.web_dist / "index.html"

@@ -2,7 +2,7 @@ services:
   database:
     image: postgres:16-alpine
     environment:
-      POSTGRES_DB: rsl_xai
+      POSTGRES_DB: rsl
       POSTGRES_USER: rsl
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rsl-local-only-password}
     ports:
@@ -10,7 +10,7 @@ services:
     volumes:
       - rsl_postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U rsl -d rsl_xai"]
+      test: ["CMD-SHELL", "pg_isready -U rsl -d rsl"]
       interval: 3s
       timeout: 3s
       retries: 20
@@ -21,7 +21,7 @@ services:
       database:
         condition: service_healthy
     environment:
-      RSL_DATABASE_URL: postgresql+psycopg://rsl:${POSTGRES_PASSWORD:-rsl-local-only-password}@database:5432/rsl_xai
+      RSL_DATABASE_URL: postgresql+psycopg://rsl:${POSTGRES_PASSWORD:-rsl-local-only-password}@database:5432/rsl
       RSL_JWT_SECRET: ${RSL_JWT_SECRET:-development-only-secret-change-before-deployment-32chars}
       RSL_STORAGE_PATH: /data/storage
     ports:

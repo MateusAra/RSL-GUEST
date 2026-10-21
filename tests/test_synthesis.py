@@ -172,7 +172,7 @@ def test_themes_need_codes_and_show_evidence(client, team):
 
 
 def test_dual_coding_is_blind_measures_agreement_and_resolves(client, team, signup):
-    base, owner, bruno, articles, ids = team["base"], team["owner"], team["bruno"], team["articles"], team["ids"]
+    base, owner, bruno, ids = team["base"], team["owner"], team["bruno"], team["ids"]
     first, second = _active_code(client, team, "Confiança"), _active_code(client, team, "XAI")
     assert client.put(f"{base}/coding/settings", headers=bruno, json={"dual_enabled": True}).status_code == 403
     assert client.put(f"{base}/coding/settings", headers=owner, json={"dual_enabled": True, "coder_a_id": ids["owner"],

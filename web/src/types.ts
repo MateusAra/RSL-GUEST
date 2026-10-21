@@ -213,3 +213,69 @@ export type SynthesisChecklist = {
   items: { item: number; text: string; met: boolean | null; justification: string }[];
   evaluated: boolean;
 };
+
+export type Hypothesis = {
+  id: number;
+  code: string;
+  statement: string;
+  independent_variables: string;
+  dependent_variables: string;
+  operational_criteria: string;
+  order: number;
+};
+export type VerdictKey = "supports" | "partial" | "refutes" | "inconclusive";
+export type Verdicts = Record<string, Record<string, { verdict: VerdictKey; justification: string }>>;
+export type Ranked = { label: string; count: number }[];
+export type InsightFilters = {
+  min_quality_pct: number | null;
+  year_from: number | null;
+  year_to: number | null;
+  source_ids: number[];
+  categories: string[];
+};
+export type AnalysisWeighting = {
+  high_min_pct: number;
+  high_weight: number;
+  moderate_min_pct: number;
+  moderate_weight: number;
+  author_concentration_pct: number;
+};
+export type HypothesisSynthesis = {
+  id: number;
+  code: string;
+  statement: string;
+  rated: number;
+  missing: number;
+  verdicts: { verdict: VerdictKey; label: string; count: number; pct: number; weighted: number; weighted_pct: number; moderate_band: number }[];
+};
+export type Insights = {
+  filters: InsightFilters;
+  settings: AnalysisWeighting;
+  corpus: number;
+  final_total: number;
+  quality_bands: Record<"high" | "moderate" | "low" | "none", number>;
+  bibliometrics: {
+    per_year: Ranked;
+    per_source: Ranked;
+    per_venue: Ranked;
+    per_category: Ranked;
+    top_keywords: Ranked;
+    top_authors: Ranked;
+    coauthor_pairs: Ranked;
+    author_concentration: { author: string; count: number; pct: number }[];
+  };
+  fields: { field_id: number; field: string; field_type: string; values: Ranked; unanswered: number }[];
+  hypotheses: HypothesisSynthesis[];
+  comparison?: { corpus: number; hypotheses: HypothesisSynthesis[] };
+};
+export type Crosstab = { field_a: string; field_b: string; rows: string[]; columns: string[]; matrix: number[][]; corpus: number };
+export type Snapshot = {
+  id: number;
+  label: string;
+  filters: InsightFilters;
+  settings: AnalysisWeighting;
+  created_by_id: number | null;
+  created_at: string;
+  corpus: number;
+  results?: Insights;
+};

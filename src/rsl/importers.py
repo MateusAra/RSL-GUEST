@@ -42,6 +42,31 @@ CSV_ALIASES = {
 }
 
 
+DOCUMENT_CATEGORIES = {
+    "journal": "Periódico",
+    "conference": "Evento",
+    "preprint": "Pré-print",
+    "thesis": "Tese ou dissertação",
+    "book": "Livro ou capítulo",
+    "other": "Outro",
+}
+_CATEGORY_ALIASES = {
+    "journal": {"article", "jour", "jfull", "ejour", "mgzn", "journalarticle", "journal"},
+    "conference": {"inproceedings", "conference", "proceedings", "conf", "cpaper", "conferencepaper", "proceedingspaper"},
+    "preprint": {"unpublished", "unpb", "preprint"},
+    "thesis": {"phdthesis", "mastersthesis", "thes", "thesis", "dissertation"},
+    "book": {"book", "inbook", "incollection", "chap", "bookchapter", "booksection"},
+}
+
+
+def document_category(document_type: str, journal: str = "", doi: str = "") -> str:
+    """Group raw BibTeX/RIS/CSV document types into a few comparable publication channels."""
+    if doi.startswith("10.48550/") or "arxiv" in journal.casefold():
+        return "preprint"
+    normalized = re.sub(r"[^a-z]", "", document_type.casefold())
+    return next((category for category, aliases in _CATEGORY_ALIASES.items() if normalized in aliases), "other")
+
+
 def normalize_title(title: str) -> str:
     ascii_title = unicodedata.normalize("NFKD", title).encode("ascii", "ignore").decode("ascii")
     return " ".join(re.sub(r"[^a-z0-9]+", " ", ascii_title.casefold()).split())

@@ -16,7 +16,6 @@ from ..models import (
     Article,
     DataExtraction,
     DataExtractionField,
-    DataExtractionLookup,
     QualityAnswer,
     QualityAssessment,
     QualityQuestion,

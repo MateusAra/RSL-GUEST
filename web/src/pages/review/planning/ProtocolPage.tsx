@@ -9,6 +9,7 @@ import type { KeywordRow, Picoc, Planning, SourceRow } from "../../../types";
 import { usePlanningMutation } from "./usePlanning";
 import { useQuery } from "@tanstack/react-query";
 import { useReview } from "../useReview";
+import HypothesesSection from "./HypothesesSection";
 
 const RELATED_TO: Record<KeywordRow["related_to"], string> = {
   "": "—",
@@ -355,6 +356,7 @@ export default function ProtocolPage({ planning }: { planning: Planning }) {
       <Objectives planning={planning} />
       <PicocSection planning={planning} />
       <Questions planning={planning} />
+      <HypothesesSection />
       <Keywords planning={planning} />
       <SearchString planning={planning} />
       <Sources planning={planning} />

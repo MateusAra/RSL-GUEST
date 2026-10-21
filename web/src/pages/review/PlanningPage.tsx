@@ -11,6 +11,7 @@ const PROTOCOL_SECTIONS = [
   { href: "#objetivos", label: "Objetivos" },
   { href: "#picoc", label: "PICOC" },
   { href: "#perguntas", label: "Perguntas de pesquisa" },
+  { href: "#hipoteses", label: "Hipóteses (opcional)" },
   { href: "#palavras-chave", label: "Palavras-chave e sinônimos" },
   { href: "#string", label: "String de busca" },
   { href: "#fontes", label: "Fontes" },

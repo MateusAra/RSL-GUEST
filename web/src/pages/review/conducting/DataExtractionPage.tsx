@@ -5,9 +5,10 @@ import { api } from "../../../api";
 import Panel from "../../../components/Panel";
 import ErrorAlert from "../../../components/ErrorAlert";
 import BlockedNotice from "../../../components/BlockedNotice";
-import type { DataExtractionData, ExtractionValue } from "../../../types";
+import type { DataExtractionData, ExtractionValue, Hypothesis, Verdicts } from "../../../types";
 import { useReview } from "../useReview";
 import { downloadFile } from "./download";
+import VerdictEditor from "./VerdictEditor";
 
 type Field = DataExtractionData["fields"][number];
 
@@ -63,6 +64,8 @@ export default function DataExtractionPage() {
   const queryClient = useQueryClient();
   const key = ["data-extraction", review.id];
   const data = useQuery({ queryKey: key, queryFn: () => api.get<DataExtractionData>(`/reviews/${review.id}/data-extraction`) });
+  const hypotheses = useQuery({ queryKey: ["hypotheses", review.id], queryFn: () => api.get<Hypothesis[]>(`/reviews/${review.id}/hypotheses`) });
+  const verdicts = useQuery({ queryKey: ["verdicts", review.id], queryFn: () => api.get<Verdicts>(`/reviews/${review.id}/verdicts`) });
   const save = useMutation({
     mutationFn: ({ articleId, fieldId, value }: { articleId: number; fieldId: number; value: ExtractionValue }) =>
       api.put(`/reviews/${review.id}/articles/${articleId}/extraction`, { field_id: fieldId, value }),
@@ -125,6 +128,7 @@ export default function DataExtractionPage() {
                         onSave={(value) => save.mutate({ articleId: article.id, fieldId: field.id, value })} />
                     </Form.Group>
                   ))}
+                  <VerdictEditor articleId={article.id} hypotheses={hypotheses.data ?? []} verdicts={verdicts.data} />
                   <Form.Check type="switch" id={`finished-${article.id}`} className="mt-3" label="Extração concluída"
                     checked={article.finished_data_extraction}
                     onChange={(event) => finish.mutate({ articleId: article.id, finished: event.target.checked })} />

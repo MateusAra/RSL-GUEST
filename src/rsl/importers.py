@@ -10,6 +10,8 @@ from typing import Any
 
 import bibtexparser
 import rispy
+from bibtexparser.bparser import BibTexParser
+from bibtexparser.customization import convert_to_unicode
 
 ARTICLE_TEXT_FIELDS = (
     "bibtex_key", "title", "author", "journal", "year", "pages", "volume", "abstract", "document_type",
@@ -110,7 +112,10 @@ def _finalize(record: dict[str, Any]) -> dict[str, str]:
 
 
 def _from_bibtex(text: str) -> list[dict[str, str]]:
-    entries = bibtexparser.loads(text).entries
+    # LaTeX escapes and accents (\&, {\'e}, {\"u}) become plain Unicode; one parser per file, as parsers accumulate.
+    parser = BibTexParser(common_strings=True)
+    parser.customization = convert_to_unicode
+    entries = bibtexparser.loads(text, parser).entries
     articles = []
     for entry in entries:
         value = {key: _clean_bibtex(str(item)) for key, item in entry.items()}

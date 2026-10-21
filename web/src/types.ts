@@ -301,3 +301,40 @@ export type EvidenceChain = {
   studies: { article_id: number; title: string; fields: { field: string; value: string }[]; segments: { segment_id: number; text: string; page: string; code: string; theme: string }[] }[];
   gaps: string[];
 }[];
+
+export type PrismaFlow = {
+  identified: number;
+  per_source: { source: string; count: number }[];
+  duplicates_removed: number;
+  screened: number;
+  excluded_screening: number;
+  excluded_by_criteria: { criteria: string; count: number }[];
+  awaiting_screening: number;
+  assessed_quality: number;
+  excluded_quality: number;
+  included: number;
+  consistent: boolean;
+};
+export type PrismaChecklistItem = {
+  item: string;
+  section: string;
+  topic: string;
+  description: string;
+  status: "met" | "not_met" | "na" | null;
+  status_label: string;
+  location: string;
+  justification: string;
+};
+export type PrismaStatus = {
+  flow: PrismaFlow;
+  sections: Record<string, string>;
+  section_labels: Record<string, string>;
+  required: string[];
+  reference_style: "apa" | "abnt";
+  reference_styles: Record<string, string>;
+  checklist: PrismaChecklistItem[];
+  statuses: Record<string, string>;
+  attribution: string;
+  warnings: string[];
+};
+export type ReportVersion = { id: number; format: "docx" | "latex"; reference_style: string; numbers: PrismaFlow; file_name: string; created_by_id: number | null; created_at: string };

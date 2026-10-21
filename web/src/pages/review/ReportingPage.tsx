@@ -1,15 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button, Col, Form, Row, Spinner } from "react-bootstrap";
+import { Route, Routes } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api } from "../../api";
 import Panel from "../../components/Panel";
 import ErrorAlert from "../../components/ErrorAlert";
 import { downloadFile } from "./conducting/download";
 import { useReview } from "./useReview";
+import SideNav from "../../components/SideNav";
+import PrismaReportPage, { PrismaChecklistPage } from "./report/PrismaReportPage";
 
 type Section = { key: string; group: string; label: string };
 
-export default function ReportingPage() {
+function FreeExportPage() {
   const review = useReview();
   const sections = useQuery({ queryKey: ["report-sections"], queryFn: () => api.get<Section[]>("/report/sections") });
   const [chosen, setChosen] = useState<Set<string>>(new Set());
@@ -71,5 +74,26 @@ export default function ReportingPage() {
         {download.isPending ? "Gerando…" : "Baixar .docx"}
       </Button>
     </Panel>
+  );
+}
+
+export default function ReportingPage() {
+  return (
+    <Row className="g-4">
+      <Col md={3}>
+        <SideNav items={[
+          { to: "", label: "Relato PRISMA 2020", end: true },
+          { to: "checklist", label: "Checklist PRISMA" },
+          { to: "exportacao", label: "Exportação livre" },
+        ]} />
+      </Col>
+      <Col md={9}>
+        <Routes>
+          <Route index element={<PrismaReportPage />} />
+          <Route path="checklist" element={<PrismaChecklistPage />} />
+          <Route path="exportacao" element={<FreeExportPage />} />
+        </Routes>
+      </Col>
+    </Row>
   );
 }

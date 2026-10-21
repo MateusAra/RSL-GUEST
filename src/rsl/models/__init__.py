@@ -16,6 +16,15 @@ from .collaboration import (
     QuestionField,
     QuestionTheme,
 )
+from .report import (
+    REFERENCE_STYLES,
+    REPORT_SECTIONS,
+    REQUIRED_SECTIONS,
+    PrismaItem,
+    ReportSection,
+    ReportSettings,
+    ReportVersion,
+)
 from .insights import VERDICTS, AnalysisSettings, AnalysisSnapshot, Hypothesis, HypothesisVerdict
 from .synthesis import (
     CHECKLIST_ITEMS,
@@ -49,6 +58,13 @@ from .reviews import (
 )
 
 __all__ = [
+    "REFERENCE_STYLES",
+    "REPORT_SECTIONS",
+    "REQUIRED_SECTIONS",
+    "PrismaItem",
+    "ReportSection",
+    "ReportSettings",
+    "ReportVersion",
     "STAGES",
     "ArticleAssignment",
     "ArticleComment",

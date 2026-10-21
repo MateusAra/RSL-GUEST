@@ -161,3 +161,11 @@ def test_manual_article_and_exports(client, review):
     rows = list(csv.DictReader(io.StringIO(exported.text)))
     assert len(rows) == 3
     assert {row["status"] for row in rows} == {"Aceito", "Não classificado"}
+
+
+def test_bibtex_latex_escapes_become_unicode(client, review):
+    review_id, headers, ids = _setup(client, review)
+    content = rb"""@article{a, title={Trust \& agents in S{\~a}o Paulo}, author={M{\"u}ller, J{\'o}se}, year={2020}}"""
+    _import(client, review_id, headers, ids["Scopus"], "accents.bib", content)
+    article = client.get(f"/reviews/{review_id}/articles", headers=headers).json()["items"][0]
+    assert (article["title"], article["author"]) == ("Trust & agents in São Paulo", "Müller, Jóse")

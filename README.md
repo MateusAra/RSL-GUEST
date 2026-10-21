@@ -5,7 +5,10 @@ Ferramenta web para conduzir revisões sistemáticas em equipe, seguindo o fluxo
 - **Contas próprias:** qualquer pessoa cria a conta, cria revisões e convida coautores pelo e-mail. O convidado aceita ou recusa logado na própria conta, e o convite fica esperando se a pessoa ainda não tiver conta.
 - **Planejamento:** objetivos, PICOC, perguntas de pesquisa, palavras-chave e sinônimos (com importação do PICOC), string de busca gerada e editável, fontes (bibliotecas sugeridas ou próprias), critérios de inclusão e exclusão, checklist de qualidade (respostas com peso, pontuação máxima, nota de corte) e formulário de extração (booleano, texto, real, inteiro, data, seleção única e múltipla).
 - **Condução:** strings por fonte; importação de BibTeX, RIS e CSV; seleção de estudos com abas por fonte, filtros, ação em massa, detecção de duplicados e modal com Anterior/Próximo; avaliação de qualidade; extração de dados com exportação CSV; análise com gráficos.
-- **Relatório:** documento do Word com as seções escolhidas.
+- **Síntese temática:** codebook (dedutivo e emergente, com histórico), trechos com página, dupla codificação opcional com α de Krippendorff/κ de Cohen, temas e mapa temático, checklist de confiabilidade.
+- **Análises:** bibliometria, cruzamento de campos de extração, hipóteses opcionais com vereditos ponderados pela qualidade, sensibilidade por filtros e instantâneos.
+- **Painel da equipe:** atribuição de estudos, discussões por estudo, notificações no sistema, progresso e cadeia de evidência por pergunta de pesquisa.
+- **Relatório:** relato PRISMA 2020 (fluxograma calculado, esqueleto escrito pelos pesquisadores, checklist de 27 itens) em Word e LaTeX, com referências em BibTeX/RIS, estilos APA e ABNT e histórico de versões; e exportação livre por seções.
 
 ## Executar com Docker
 ```bash

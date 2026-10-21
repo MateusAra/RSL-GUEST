@@ -23,13 +23,12 @@ services:
     environment:
       RSL_DATABASE_URL: postgresql+psycopg://rsl:${POSTGRES_PASSWORD:-rsl-local-only-password}@database:5432/rsl_xai
       RSL_JWT_SECRET: ${RSL_JWT_SECRET:-development-only-secret-change-before-deployment-32chars}
-      OBJECT_STORAGE_BACKEND: filesystem
-      ARTIFACT_STORAGE_PATH: /data/artifacts
+      RSL_STORAGE_PATH: /data/storage
     ports:
       - "127.0.0.1:8002:8000"
     volumes:
-      - rsl_artifact_data:/data/artifacts
+      - rsl_storage_data:/data/storage
 
 volumes:
   rsl_postgres_data:
-  rsl_artifact_data:
+  rsl_storage_data:

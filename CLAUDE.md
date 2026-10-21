@@ -1,26 +1,23 @@
 # CLAUDE.md — instruções para o agente
 
-Projeto: sistema de apoio à RSL "XAI for Multi-Agent Systems". Desenvolvimento orientado por especificação (SDD). Pesquisador responsável: Wladimir Farias Tenório Filho (PO).
-
-## Antes de qualquer alteração
-1. Leia `constitution.md`. Ela vale para tudo.
-2. Leia a spec do módulo em `specs/NNN-…/spec.md` e, se houver tela, `frontend/spec-front.md`.
-3. Se a tarefa toca método (triagem, QA, síntese, GenAI), leia o extrato em `papers/extratos/` citado na spec.
-
-## Regras
-- Não implemente nada que não esteja na spec. Comportamento novo → proponha alteração na spec primeiro.
-- Item marcado `[ESCLARECER]` **não** se resolve sozinho: pergunte ao PO ou implemente só o que a spec já fixa.
-- Requisitos entre parênteses como "proposta" ou `PRP-##` só entram após aprovação do PO.
-- Nenhuma função de IA em triagem, QA, extração, codificação ou síntese (constituição P2; spec 011).
-- Decisões humanas exigem confirmação explícita e ficam na auditoria imutável; nunca apague registros.
-- κ e α só por biblioteca validada, conferida em ≥ 3 casos manuais (tolerância 0,001).
-- Escreva os testes dos `CA-##` antes do código. Cada tarefa cita RF e CA. Commits pequenos.
-- O Protocolo v4.0 (`docs/fonte/`) prevalece sobre artigos. Divergência vira `[ESCLARECER]`, não decisão sua.
-- Decisão técnica relevante → ADR em `docs/adr/`.
-
-## Fluxo por módulo
-clarificar → `plan.md` (modelo de dados, API, ADRs) → `tasks.md` (≤ 4 h cada) → testes → implementar → validar com o PO → sincronizar a spec.
+Projeto: **RSL**, ferramenta web genérica de apoio a revisões sistemáticas da literatura, inspirada no fluxo do Parsifal (Revisão → Planejamento → Condução → Relatório). Qualquer pessoa cria a própria conta, cria revisões e convida coautores pelo e-mail.
 
 ## Estrutura
-`constitution.md` · `specs/` · `frontend/` · `docs/` (ADRs, fontes, benchmark) · `papers/` · `src/`
-Idioma: documentação em português do Brasil; código e identificadores em inglês.
+- `src/rsl/` — API FastAPI: `models/` (SQLAlchemy), `routers/` (um por área), `deps.py` (sessão, usuário atual, `MemberReview`/`OwnerReview`), `security.py` (scrypt + JWT + refresh rotativo).
+- `migrations/` — Alembic. Toda mudança de modelo ganha uma migração nova.
+- `web/` — React + TypeScript + Vite + react-bootstrap. `src/api.ts` é o único cliente HTTP.
+- `tests/` — pytest; cada teste cria um banco SQLite próprio (`conftest.py`).
+- `docs/legado/` — specs e documentos da versão anterior (sob medida para uma RSL). Não valem mais.
+
+## Regras
+- Permissão: membro (autor principal ou coautor) edita o conteúdo; só o autor principal exclui a revisão e gerencia coautores e convites. Quem não é membro recebe 404.
+- Interface em português do Brasil; código e identificadores em inglês.
+- Antes de concluir: `pytest -q` e `npm run build` (em `web/`) sem erro.
+
+## Rodar localmente
+```bash
+pip install -r requirements.txt
+cd web && npm install && npm run build && cd ..
+PYTHONPATH=src uvicorn rsl.app:app --port 8002
+```
+Em desenvolvimento do front: API na 8002 e `npm run dev` em `web/` (proxy de `/api`).

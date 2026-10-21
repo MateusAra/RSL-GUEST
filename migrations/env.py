@@ -11,15 +11,17 @@ from sqlalchemy import engine_from_config, pool
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from rsl_foundation.database import Base
+from rsl import models  # noqa: E402,F401  (registers every table on Base.metadata)
+from rsl.db import Base  # noqa: E402
 
 config = context.config
+# The app passes its own URL (attributes["from_app"]); the alembic CLI uses RSL_DATABASE_URL.
 database_url = os.environ.get("RSL_DATABASE_URL")
-if database_url:
+if database_url and not config.attributes.get("from_app"):
     config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 
@@ -30,7 +32,7 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
-        compare_type=True,
+        render_as_batch=True,
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -43,7 +45,7 @@ def run_migrations_online() -> None:
         poolclass=pool.NullPool,
     )
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata, compare_type=True)
+        context.configure(connection=connection, target_metadata=target_metadata, render_as_batch=True)
         with context.begin_transaction():
             context.run_migrations()
 

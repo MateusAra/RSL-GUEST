@@ -1,32 +1,47 @@
-import os
-import sys
-import tempfile
+from __future__ import annotations
+
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-SRC = ROOT / "src"
-if str(SRC) not in sys.path:
-    sys.path.insert(0, str(SRC))
+import pytest
+from fastapi.testclient import TestClient
 
-_test_data = tempfile.TemporaryDirectory(prefix="rsl-test-db-")
-os.environ["RSL_DATABASE_URL"] = f"sqlite+pysqlite:///{Path(_test_data.name) / 'test.sqlite3'}"
-os.environ["RSL_JWT_SECRET"] = "test-signing-key-for-rsl-api-with-32-bytes"
+from rsl.app import create_app
+from rsl.settings import Settings
 
-
-class MemoryObjectStorage:
-    def __init__(self):
-        self.objects: dict[str, bytes] = {}
-
-    def store(self, object_key: str, content: bytes, *, content_type: str, sha256: str) -> None:
-        self.objects[object_key] = content
-
-    def read(self, object_key: str) -> bytes:
-        return self.objects[object_key]
-
-    def remove(self, object_key: str) -> None:
-        self.objects.pop(object_key, None)
+API = "/api/v1"
 
 
-from backend.api import service
+@pytest.fixture
+def client(tmp_path: Path) -> Iterator[TestClient]:
+    settings = Settings(
+        database_url=f"sqlite+pysqlite:///{(tmp_path / 'test.sqlite3').as_posix()}",
+        jwt_secret="test-signing-key-for-rsl-api-with-32-bytes",
+        storage_path=tmp_path / "storage",
+        web_dist=tmp_path / "no-web-build",
+    )
+    with TestClient(create_app(settings), base_url="http://testserver" + API) as test_client:
+        yield test_client
 
-service.set_object_storage(MemoryObjectStorage())
+
+@pytest.fixture
+def signup(client: TestClient) -> Callable[..., dict[str, str]]:
+    """Create an account and return its auth headers."""
+
+    def _signup(username: str = "ana", email: str | None = None, password: str = "senha-segura") -> dict[str, str]:
+        response = client.post("/auth/signup", json={
+            "username": username, "email": email or f"{username}@example.com", "password": password,
+            "first_name": username.title(),
+        })
+        assert response.status_code == 201, response.text
+        return {"Authorization": f"Bearer {response.json()['access_token']}"}
+
+    return _signup
+
+
+@pytest.fixture
+def review(client: TestClient, signup) -> tuple[int, dict[str, str]]:
+    headers = signup("dona")
+    response = client.post("/reviews", headers=headers, json={"title": "Revisão de teste", "description": "Teste"})
+    assert response.status_code == 201, response.text
+    return response.json()["id"], headers

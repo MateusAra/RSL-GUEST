@@ -1,20 +1,22 @@
 [project]
-name = "rsl-foundation"
-version = "0.1.0"
-description = "Foundation module for the RSL system"
+name = "rsl"
+version = "1.0.0"
+description = "Ferramenta genérica de apoio a revisões sistemáticas da literatura"
 requires-python = ">=3.12"
 dependencies = [
+	"fastapi>=0.115.0",
+	"uvicorn>=0.30.0",
+	"pydantic>=2.8.0",
 	"PyJWT>=2.9.0,<3.0.0",
 	"SQLAlchemy>=2.0,<3.0",
 	"alembic>=1.13,<2.0",
 	"psycopg[binary]>=3.2,<4.0",
+	"python-multipart>=0.0.9,<1.0",
 	"rispy>=0.9,<1.0",
 	"bibtexparser>=1.4,<2.0",
 	"rapidfuzz>=3.9,<4.0",
-	"python-multipart>=0.0.9,<1.0",
-	"minio>=7.2,<8.0",
-	"scikit-learn>=1.5,<2.0",
 	"numpy>=1.26,<3.0",
+	"python-docx>=1.1,<2.0",
 ]
 
 [tool.pytest.ini_options]
